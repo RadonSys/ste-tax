@@ -15,16 +15,15 @@ Enforced (fields cannot contradict):
 - status is a sum: approved->meaning, unapproved->guidance.
 - alternatives() is pure over guidance, never stored.
 - pos from a closed set; qualifier/examples are Options.
-- (word, pos) may repeat: the dictionary lists some entries twice
-  (e.g. OF/prep, two senses). Index to a list, not a single record.
+- Deduplicated by (word, pos, qualifier).
 
 Method: columns come from each page's header row (margins mirror, so no
-global geometry). A headword line starts a new entry iff an all-segment
-table rule separates it from the previous headword line; otherwise it is a
-variant of the current entry (rare, e.g. "chance" / "(by chance)").
-Variants pair to senses by order; a lone variant takes the whole entry.
-"Word (part of speech)" cell notes ("No other verb forms.") are writer
-guidance, not lexical data, and are not captured.
+global geometry). A non-parenthesized headword line starts a new entry;
+parenthesized headwords ("(by chance) (n)") are variants of the current
+entry. Split multi-word headwords ("DOWNSTREAM" / "OF (prep)") are
+combined. Variants pair to senses by order; a lone variant takes the whole
+entry. "Word (part of speech)" cell notes ("No other verb forms.") are
+writer guidance, not lexical data, and are not captured.
 """
 
 import json
@@ -44,7 +43,7 @@ HEADER_WORDS = ("Word", "Approved", "STE", "Non-STE")
 HEADWORD_RE = re.compile(
     r"^(?=[^()]*\()"  # must contain a paren group
     r"(?P<phrase>(?:\([^)]+\)|[A-Za-z][\w\-'/]*(?:\s+[\w\-'/.]+)*))"
-    r"(?:\s*\((?P<paren1>[a-z]+(?: [a-z]+)*)\))?"
+    r"(?:\s*\((?P<paren1>(?:[a-z]+(?: [a-z]+)*|or [A-Za-z]+))\))?"
     r"(?:\s*\((?P<paren2>[a-z]+)\))?"
     r"(?P<rest>.*)$")
 PHRASE_RE = re.compile(r"^[A-Za-z][\w\-'/]*(?:\s+[\w\-'/.]+)+$")
@@ -53,7 +52,7 @@ BARE_WORD_RE = re.compile(r"^[A-Za-z][\w\-'/]*$")
 TRAIL_ALT_RE = re.compile(r"^([A-Z][\w\-'/]*)\s*\(([a-z]+)\)$")
 ALT_REF_RE = re.compile(r"([A-Z][\w\-'/]*)\s*\(([a-z]+)\)")
 FORMS_RE = re.compile(r"^[A-Za-z][\w\-',/]*(?:\s+[A-Za-z][\w\-',/]*)*$")
-NOTE_RE = re.compile(r"^(No other verb|forms\.)$")
+NOTE_RE = re.compile(r"^(No other|forms?(\.| of this)|adjective\.|verb\.|noun\.)$")
 FOOTER_TEXTS = {"Issue 9", "2025-01-15",
                 "ASD-STE100 Simplified Technical English",
                 "Part 2 - Dictionary"}
@@ -81,26 +80,6 @@ def column_starts(page):
     if set(found) != set(HEADER_WORDS):
         raise ValueError(f"header row missing: {sorted(found)}")
     return tuple(found[k] for k in HEADER_WORDS)
-
-
-def page_bounds(page):
-    """Y of all-segment rules (entry boundaries). Empty if none drawn."""
-    segs = {}
-    for d in page.get_drawings():
-        r = d["rect"]
-        if r.width > r.height * 20 and r.height < 3 and r.width > 50:
-            y = round(r.y0, 1)
-            if 95 < y < 710:
-                segs.setdefault(y, []).append((r.x0, r.x1))
-    bounds = []
-    for y, ss in segs.items():
-        # full-width: starts at left margin, spans most of text width
-        # (right margin varies by mirrored geometry; use span not edge)
-        if min(s[0] for s in ss) < 75 and \
-                max(s[1] for s in ss) - min(s[0] for s in ss) > 450 \
-                and len(ss) >= 4:
-            bounds.append(y)
-    return sorted(bounds)
 
 
 def body_column(x0, starts):
@@ -150,6 +129,11 @@ def parse_variant(text):
         phrase = phrase[1:-1]
     pos, qual = None, None
     p1, p2 = m.group("paren1"), m.group("paren2")
+    alt_form = None
+    if p1 and p1.startswith("or "):
+        # alternative spelling: "MATT (or MATTE)" -> form "MATTE"
+        alt_form = p1[3:].strip()
+        p1 = None
     if p2:
         qual, pos = p1, p2
     elif p1:
@@ -160,7 +144,9 @@ def parse_variant(text):
         else:
             qual = p1
     else:
-        raise ValueError(f"bad headword (no paren): {text!r}")
+        # no paren1/paren2, but alt_form may exist
+        if not alt_form:
+            raise ValueError(f"bad headword (no paren): {text!r}")
     if pos is not None and pos not in POS_TAGS:
         raise ValueError(f"bad pos {pos!r} in {text!r}")
     trail, extra = None, None
@@ -171,11 +157,12 @@ def parse_variant(text):
             trail = (tm.group(1), tm.group(2))
         else:
             extra = rest
-    return phrase, qual, pos, trail, extra
+    return phrase, qual, pos, trail, extra, alt_form
 
 
 def split_forms(text):
-    return [t for t in re.split(r"[,\s]+", text.strip(", ")) if t]
+    # split on commas; keep multi-word phrases intact ("CAME ON")
+    return [t.strip() for t in text.strip(", ").split(",") if t.strip()]
 
 
 def new_entry(pageno, starts):
@@ -192,7 +179,7 @@ def main():
         return 1
 
     records, warnings, errors = [], [], []
-    cur, last_hw_y = None, None
+    cur = None
 
     def warn(msg):
         warnings.append(msg)
@@ -210,14 +197,14 @@ def main():
         if not variants:
             errors.append(f"entry without headword p{entry['pageno']}")
             return
-        poses = [p for (_, _, p, _, _) in variants if p]
+        poses = [p for (_, _, p, _, _, _) in variants if p]
         if not poses:
             errors.append(f"entry without pos p{entry['pageno']}: "
                           f"{variants[0][0]!r}")
             return
         first_pos = poses[0]
-        variants = [(ph, q, p or first_pos, tr, ex)
-                    for (ph, q, p, tr, ex) in variants]
+        variants = [(ph, q, p or first_pos, tr, ex, af)
+                    for (ph, q, p, tr, ex, af) in variants]
         bodies = entry["bodies"]
         starts = entry["starts"]
         if len(variants) == 1:
@@ -239,7 +226,7 @@ def main():
             if len(senses) != len(variants):
                 warn(f"sense/variant mismatch p{entry['pageno']}: "
                      f"{[v[0] for v in variants]} -> {len(senses)} senses")
-        for i, (phrase, qual, pos, trail, _ex) in enumerate(variants):
+        for i, (phrase, qual, pos, trail, _ex, alt_form) in enumerate(variants):
             sense = senses[min(i, len(senses) - 1)] \
                 if len(variants) > 1 else senses[0]
             meaning = " ".join(t for row in sense for x, t in row
@@ -255,16 +242,17 @@ def main():
                 status = {"kind": "approved", "meaning": meaning.strip()}
             else:
                 status = {"kind": "unapproved", "guidance": meaning.strip()}
+            forms = list(entry["forms"])
+            if alt_form:
+                forms.append(alt_form)
             records.append({"word": phrase, "pos": pos, "qualifier": qual,
-                            "forms": entry["forms"], "status": status,
+                            "forms": forms, "status": status,
                             "ste_example": ste, "nonste_example": nonste})
 
     for pageno in word_pages:
         page = doc[pageno]
         starts = column_starts(page)
-        bounds = page_bounds(page)
         rows = make_rows(list(page_lines(page)))
-        last_hw_y = None
         skip = set()  # row indices consumed by split headwords
         for i, (y, parts) in enumerate(rows):
             if i in skip:
@@ -273,6 +261,7 @@ def main():
             hw = None
             # split multi-word headword: bare word + short word (pos)
             # e.g. "DOWNSTREAM" / "OF (prep)" -> "DOWNSTREAM OF (prep)"
+            split_extra = None
             if x0 < 150 and BARE_WORD_RE.match(text) and text.isupper() \
                     and i + 1 < len(rows):
                 ny, nparts = rows[i + 1]
@@ -290,6 +279,9 @@ def main():
                             skip.add(i + 1)
                             # use combined text for variant
                             text = f"{text} {ntext}"
+                            # capture meaning parts from skipped row
+                            split_extra = [(x, t) for x, t in nparts[1:]
+                                           if x >= 150]
                         except ValueError:
                             pass
             if x0 < 150 and hw is None:
@@ -325,7 +317,6 @@ def main():
                     if cur:
                         emit(cur)
                     cur = new_entry(pageno, starts)
-                    last_hw_y = y
                 # else: variant of cur; keep accumulating
                 if hw == "full" or hw == "full-split":
                     pv = parse_variant(text)
@@ -337,10 +328,13 @@ def main():
                         errors.append(f"dangling phrase {cur['pending']!r}")
                     cur["pending"] = text
                 else:  # bare
-                    cur["variants"].append((text, None, None, None, None))
+                    cur["variants"].append((text, None, None, None, None, None))
                 rest = [(x, t) for x, t in parts[1:] if x >= 150]
                 if rest:
                     cur["bodies"].append(rest)
+                # meaning parts from split headword's second row
+                if split_extra:
+                    cur["bodies"].append(split_extra)
                 # word-cell parts beyond the headword on this row: none
                 # expected; anything there is logged below via word cont
                 for x1, t1 in parts[1:]:
@@ -358,7 +352,8 @@ def main():
                             inner = cur["paren"].strip()[1:]
                             if inner.endswith(")"):
                                 inner = inner[:-1]
-                            for tok in re.split(r"[,\s]+", inner):
+                            for tok in inner.split(","):
+                                tok = tok.strip()
                                 if tok and tok.lower() != "also":
                                     cur["forms"].append(tok)
                             cur["paren"] = None
@@ -368,20 +363,21 @@ def main():
                             errors.append(f"bad pos {pos!r} p{pageno}")
                         elif cur["pending"]:
                             cur["variants"].append(
-                                (cur["pending"], None, pos, None, None))
+                                (cur["pending"], None, pos, None, None, None))
                             cur["pending"] = None
                         elif cur["variants"] and \
                                 cur["variants"][-1][2] is None:
                             # pos for a qualifier-only headword
                             # ("provided (that)" / "(conj)")
-                            ph, q, _, tr, ex = cur["variants"][-1]
-                            cur["variants"][-1] = (ph, q, pos, tr, ex)
+                            ph, q, _, tr, ex, af = cur["variants"][-1]
+                            cur["variants"][-1] = (ph, q, pos, tr, ex, af)
                         # else: stray; ignore
                     elif t1.startswith("("):
                         cur["paren"] = t1
                         if t1.rstrip().endswith(")"):
                             inner = t1.strip()[1:-1]
-                            for tok in re.split(r"[,\s]+", inner):
+                            for tok in inner.split(","):
+                                tok = tok.strip()
                                 if tok and tok.lower() != "also":
                                     cur["forms"].append(tok)
                             cur["paren"] = None

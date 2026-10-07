@@ -52,7 +52,8 @@ BARE_WORD_RE = re.compile(r"^[A-Za-z][\w\-'/]*$")
 TRAIL_ALT_RE = re.compile(r"^([A-Z][\w\-'/]*)\s*\(([a-z]+)\)$")
 ALT_REF_RE = re.compile(r"([A-Z][\w\-'/]*)\s*\(([a-z]+)\)")
 FORMS_RE = re.compile(r"^[A-Za-z][\w\-',/]*(?:\s+[A-Za-z][\w\-',/]*)*$")
-NOTE_RE = re.compile(r"^(No other|forms?(\.| of this)|adjective\.|verb\.|noun\.)$")
+NOTE_RE = re.compile(r"^(No other( verb)?( forms?)?(\.| of this)?|forms?\."
+                     r"|adjective\.|verb\.|noun\.)$")
 FOOTER_TEXTS = {"Issue 9", "2025-01-15",
                 "ASD-STE100 Simplified Technical English",
                 "Part 2 - Dictionary"}
@@ -354,6 +355,9 @@ def main():
                                 inner = inner[:-1]
                             for tok in inner.split(","):
                                 tok = tok.strip()
+                                # strip leading "also " (e.g. "also ARE" -> "ARE")
+                                if tok.lower().startswith("also "):
+                                    tok = tok[5:].strip()
                                 if tok and tok.lower() != "also":
                                     cur["forms"].append(tok)
                             cur["paren"] = None
@@ -378,6 +382,8 @@ def main():
                             inner = t1.strip()[1:-1]
                             for tok in inner.split(","):
                                 tok = tok.strip()
+                                if tok.lower().startswith("also "):
+                                    tok = tok[5:].strip()
                                 if tok and tok.lower() != "also":
                                     cur["forms"].append(tok)
                             cur["paren"] = None

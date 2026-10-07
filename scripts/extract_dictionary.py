@@ -52,8 +52,6 @@ BARE_WORD_RE = re.compile(r"^[A-Za-z][\w\-'/]*$")
 TRAIL_ALT_RE = re.compile(r"^([A-Z][\w\-'/]*)\s*\(([a-z]+)\)$")
 ALT_REF_RE = re.compile(r"([A-Z][\w\-'/]*)\s*\(([a-z]+)\)")
 FORMS_RE = re.compile(r"^[A-Za-z][\w\-',/]*(?:\s+[A-Za-z][\w\-',/]*)*$")
-NOTE_RE = re.compile(r"^(No other( verb)?( forms?)?(\.| of this)?|forms?\."
-                     r"|adjective\.|verb\.|noun\.)$")
 FOOTER_TEXTS = {"Issue 9", "2025-01-15",
                 "ASD-STE100 Simplified Technical English",
                 "Part 2 - Dictionary"}
@@ -161,9 +159,39 @@ def parse_variant(text):
     return phrase, qual, pos, trail, extra, alt_form
 
 
+def is_note(text):
+    """Writer guidance (metalanguage), not lexical data.
+    Notes talk ABOUT the entry ('No other verb forms.'); forms ARE words.
+    Principle: a form never ends with a sentence period, and never
+    contains the metalanguage marker 'No other'."""
+    t = text.strip()
+    if "No other" in t:
+        return True
+    # trailing period = sentence fragment, not a lexical form
+    # (STE forms are bare words; abbreviations with periods don't occur
+    # in the word cell)
+    if t.endswith("."):
+        return True
+    return False
+
+
 def split_forms(text):
     # split on commas; keep multi-word phrases intact ("CAME ON")
     return [t.strip() for t in text.strip(", ").split(",") if t.strip()]
+
+
+def parse_paren_forms(text):
+    """'(also ARE, WERE)' -> ['ARE', 'WERE']; '(word)' -> ['word'].
+    'also' is a marker meaning 'these are additional forms', not part
+    of the form itself."""
+    inner = text.strip()
+    assert inner.startswith("(") and inner.endswith(")")
+    inner = inner[1:-1].strip()
+    if inner.lower().startswith("also "):
+        inner = inner[5:].strip()
+    elif inner.lower() == "also":
+        return []
+    return [p.strip() for p in inner.split(",") if p.strip()]
 
 
 def new_entry(pageno, starts):
@@ -350,16 +378,8 @@ def main():
                     if cur["paren"] is not None:
                         cur["paren"] += " " + t1
                         if t1.rstrip().endswith(")"):
-                            inner = cur["paren"].strip()[1:]
-                            if inner.endswith(")"):
-                                inner = inner[:-1]
-                            for tok in inner.split(","):
-                                tok = tok.strip()
-                                # strip leading "also " (e.g. "also ARE" -> "ARE")
-                                if tok.lower().startswith("also "):
-                                    tok = tok[5:].strip()
-                                if tok and tok.lower() != "also":
-                                    cur["forms"].append(tok)
+                            cur["forms"].extend(
+                                parse_paren_forms(cur["paren"]))
                             cur["paren"] = None
                     elif BARE_POS_RE.match(t1):
                         pos = BARE_POS_RE.match(t1).group(1)
@@ -379,15 +399,9 @@ def main():
                     elif t1.startswith("("):
                         cur["paren"] = t1
                         if t1.rstrip().endswith(")"):
-                            inner = t1.strip()[1:-1]
-                            for tok in inner.split(","):
-                                tok = tok.strip()
-                                if tok.lower().startswith("also "):
-                                    tok = tok[5:].strip()
-                                if tok and tok.lower() != "also":
-                                    cur["forms"].append(tok)
+                            cur["forms"].extend(parse_paren_forms(t1))
                             cur["paren"] = None
-                    elif NOTE_RE.match(t1):
+                    elif is_note(t1):
                         pass  # writer guidance, not lexical data
                     elif FORMS_RE.match(t1):
                         cur["forms"].extend(split_forms(t1))

@@ -265,10 +265,34 @@ def main():
         bounds = page_bounds(page)
         rows = make_rows(list(page_lines(page)))
         last_hw_y = None
+        skip = set()  # row indices consumed by split headwords
         for i, (y, parts) in enumerate(rows):
+            if i in skip:
+                continue
             x0, text = parts[0]
             hw = None
-            if x0 < 150:
+            # split multi-word headword: bare word + short word (pos)
+            # e.g. "DOWNSTREAM" / "OF (prep)" -> "DOWNSTREAM OF (prep)"
+            if x0 < 150 and BARE_WORD_RE.match(text) and text.isupper() \
+                    and i + 1 < len(rows):
+                ny, nparts = rows[i + 1]
+                nx0, ntext = nparts[0]
+                m2 = HEADWORD_RE.match(ntext)
+                if nx0 < 150 and m2 and (m2.group("paren1") or
+                                        m2.group("paren2")):
+                    ph2 = m2.group("phrase")
+                    if not ph2.startswith("(") and len(ph2) <= 3 \
+                            and ph2.isupper():
+                        # combine and parse as single headword
+                        try:
+                            pv = parse_variant(f"{text} {ntext}")
+                            hw = "full-split"
+                            skip.add(i + 1)
+                            # use combined text for variant
+                            text = f"{text} {ntext}"
+                        except ValueError:
+                            pass
+            if x0 < 150 and hw is None:
                 if BARE_POS_RE.match(text):
                     pass  # bare "(pos)"; handled in word-cell logic below
                 elif (m := HEADWORD_RE.match(text)) and \
@@ -303,7 +327,7 @@ def main():
                     cur = new_entry(pageno, starts)
                     last_hw_y = y
                 # else: variant of cur; keep accumulating
-                if hw == "full":
+                if hw == "full" or hw == "full-split":
                     pv = parse_variant(text)
                     cur["variants"].append(pv)
                     if pv[4]:

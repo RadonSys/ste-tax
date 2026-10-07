@@ -118,7 +118,8 @@ def page_lines(page):
             continue
         for line in block["lines"]:
             x0, y0 = line["bbox"][0], line["bbox"][1]
-            if y0 < 95 or y0 > 710:
+            # header at y<80; first entry at y~93; keep the entry
+            if y0 < 85 or y0 > 710:
                 continue
             text = "".join(s["text"] for s in line["spans"]).strip()
             if text and text not in FOOTER_TEXTS \

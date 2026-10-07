@@ -1,0 +1,68 @@
+ste-tax: license and educational-use notice
+==============================================
+
+1. Educational status
+---------------------
+This repository ("ste-tax") is an educational research project affiliated
+with a course project at the University of Toronto. All work in this
+repository is carried out for educational and research purposes.
+
+2. License for original work
+----------------------------
+All original content in this repository (code, documentation, analysis, and
+other materials created by the project contributors), EXCLUDING the
+ASD-STE100 artifacts described in section 3 below, is released under the
+MIT License:
+
+    Copyright (c) 2026 ste-tax contributors
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+3. ASD-STE100 artifacts: educational-use basis
+----------------------------------------------
+This repository contains artifacts derived from "ASD-STE100 Simplified
+Technical English, Issue 9 (January 2025)":
+
+    - artifacts/ASD-STE100_ISSUE9.pdf
+      (the specification document itself)
+    - data/ste100_dictionary.*
+      (word list extracted from Part 2 of the specification for research
+      use, e.g. building an STE compliance checker)
+
+These artifacts are NOT covered by the MIT license in section 2. They
+remain the property of the Aerospace, Security and Defence Industries
+Association of Europe (ASD). (c) ASD, 2025. All rights reserved.
+"ASD-STE100" is a European Union registered trademark owned by ASD.
+
+They are reproduced here under the irrevocable permission granted in the
+"Special usage rights" section of the ASD-STE100 front matter, which gives
+"Universities and research institutes for educational purposes"
+irrevocable permission to use, reproduce, or publish the document (or any
+subsequent modification or revision thereof), in whole or in part, free of
+charge.
+
+Basis of reliance: this repository is an educational research project
+affiliated with a course project at the University of Toronto, and every
+ASD-STE100 artifact in it is used solely for educational and research
+purposes. Without this exemption these artifacts could not be committed
+here. The canonical source remains https://www.asd-ste100.org/; no
+redistribution beyond this educational use is authorized by this notice.
+If ASD or the Simplified Technical English Maintenance Group (STEMG)
+objects to this use, the artifacts will be removed promptly upon notice.

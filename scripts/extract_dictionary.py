@@ -297,11 +297,17 @@ def main():
             split_extra = None
             if x0 < 150 and BARE_WORD_RE.match(text) and text.isupper() \
                     and i + 1 < len(rows):
+                # A bare word that is already a form of the current entry
+                # is a form continuation, not the first half of a split
+                # headword (e.g. the wrapped "TOUCHED" form row before
+                # "TOW (v)").
+                in_cur_forms = cur is not None and text in cur["forms"]
                 ny, nparts = rows[i + 1]
                 nx0, ntext = nparts[0]
                 m2 = HEADWORD_RE.match(ntext)
                 if nx0 < 150 and m2 and (m2.group("paren1") or
-                                        m2.group("paren2")):
+                                        m2.group("paren2")) and \
+                        not in_cur_forms:
                     ph2 = m2.group("phrase")
                     if not ph2.startswith("(") and len(ph2) <= 3 \
                             and ph2.isupper():

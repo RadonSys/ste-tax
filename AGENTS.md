@@ -46,9 +46,13 @@ Key: (term, pos, qualifier). Duplicates are merged.
   can adjust"); parser splits it.
 - Qualifiers may be multi-word ("in case of", "a few") or split across
   lines.
-- Known limitation: 777 approved terms extracted vs 875 reported in spec
-  front matter. Discrepancy unresolved. Do not "fix" by loosening the
-  parser without verifying against the PDF.
+- Page top cutoff is y=85. The first entry sits at y~93; the header at
+  y<80. A cutoff of 95 silently dropped the first entry on every page.
+- Counts (2026-10-07): 877 approved, 2194 total. Spec intro states 875
+  approved + 1274 non-approved = 2149. The 2-approved / 45-total overage
+  is unresolved; likely counting-methodology differences, not missing
+  entries. Verified against independent extraction: only 18 headwords
+  differ, mostly reference parsing artifacts.
 
 ## Design docs
 

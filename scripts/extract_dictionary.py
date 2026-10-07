@@ -373,6 +373,16 @@ def main():
     if cur:
         emit(cur)
 
+    # deduplicate by (word, pos, qualifier); keep first
+    seen = set()
+    uniq = []
+    for r in records:
+        k = (r["word"], r["pos"], r["qualifier"])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(r)
+    records = uniq
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         for r in records:

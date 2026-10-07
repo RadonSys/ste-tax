@@ -26,29 +26,26 @@ forcing LLM output into STE meaningfully affects three axes:
   and constrains only the surface form at low cost; the standard is deeply
   enough represented in parameters that compliance is cheap.
 
-## Design notes
+## Design
 
-See `docs/design.md`. The short version: the intervention must be pinned
-first (system-prompt instruction vs fine-tuning on STE vs constrained
-decoding against the dictionary vs post-hoc rewrite into STE), because
-H1/H0 discriminate cleanly only under some of these. Compliance needs a
-checker built from the extracted dictionary in `data/`. On the watermark
-axis, green-list watermarks need per-token entropy; a controlled vocabulary
-crushes entropy, so detectability should drop, and STE paraphrase doubles
-as a watermark-stripping attack experiment.
+See `docs/design.md`. The intervention must be pinned first (prompt
+instruction vs fine-tuning vs constrained decoding vs post-hoc rewrite),
+because H1/H0 discriminate cleanly only under some of these. Compliance
+needs a checker built from the extracted dictionary in `data/`.
 
 ## Repo layout
 
 - `artifacts/ASD-STE100_ISSUE9.pdf`: the specification, committed under the
   educational-use grant documented in `LICENSE` section 3. Canonical source:
   https://www.asd-ste100.org/
-- `data/ste100_dictionary.csv`: word list extracted from Part 2 of the
-  specification (word, part of speech, approval status, approved meaning).
+- `data/ste100_dictionary.jsonl`: word list extracted from Part 2 of the
+  specification. One JSON object per line: term, part of speech, qualifier,
+  forms, senses (meaning, approved alternatives, examples).
 - `scripts/extract_dictionary.py`: the parser that produced `data/`.
+  Run: `python3 scripts/extract_dictionary.py`.
 - `docs/`: research design notes.
 
-## Conventions (this repo only)
+## License
 
-- Work directly on `main`.
-- No force push. History is append-only: every commit pushed to `main` is
-  preserved, never rewritten.
+MIT for original work. The ASD-STE100 PDF remains property of ASD; see
+`LICENSE` section 3 for the educational-use basis.

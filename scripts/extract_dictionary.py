@@ -159,39 +159,49 @@ def parse_variant(text):
     return phrase, qual, pos, trail, extra, alt_form
 
 
-def is_note(text):
-    """Writer guidance (metalanguage), not lexical data.
-    Notes talk ABOUT the entry ('No other verb forms.'); forms ARE words.
-    Principle: a form never ends with a sentence period, and never
-    contains the metalanguage marker 'No other'."""
-    t = text.strip()
-    if "No other" in t:
-        return True
-    # trailing period = sentence fragment, not a lexical form
-    # (STE forms are bare words; abbreviations with periods don't occur
-    # in the word cell)
-    if t.endswith("."):
-        return True
-    return False
+def clean_forms(tokens, headword):
+    """Filter word-cell tokens to lexical forms.
+    Principle: STE uses case semantically. Approved headwords (UPPERCASE)
+    have UPPERCASE forms; unapproved (lowercase) have lowercase forms.
+    Metalanguage ('No other verb forms.') is sentence-case and never
+    matches. A trailing period marks a sentence fragment, not a word.
+    'also' is English for 'in addition', a marker not part of the form.
+    """
+    upper = headword.isupper()
+    out = []
+    for tok in tokens:
+        t = tok.strip().strip(",")
+        if not t:
+            continue
+        # 'also' marker: '(also ARE, WERE)' -> ARE, WERE are forms
+        if t.lower().startswith("also "):
+            t = t[5:].strip()
+        elif t.lower() == "also":
+            continue
+        # Sentence fragment, not a lexical item
+        if t.endswith("."):
+            continue
+        # Case must match headword: excludes sentence-case metalanguage
+        if upper:
+            if t.isupper():
+                out.append(t)
+        else:
+            if t.islower() and t[0].isalpha():
+                out.append(t)
+    return out
 
 
-def split_forms(text):
+def split_forms(text, headword):
     # split on commas; keep multi-word phrases intact ("CAME ON")
-    return [t.strip() for t in text.strip(", ").split(",") if t.strip()]
+    return clean_forms(text.strip(", ").split(","), headword)
 
 
-def parse_paren_forms(text):
-    """'(also ARE, WERE)' -> ['ARE', 'WERE']; '(word)' -> ['word'].
-    'also' is a marker meaning 'these are additional forms', not part
-    of the form itself."""
+def parse_paren_forms(text, headword):
+    """'(also ARE, WERE)' -> ['ARE', 'WERE']."""
     inner = text.strip()
     assert inner.startswith("(") and inner.endswith(")")
     inner = inner[1:-1].strip()
-    if inner.lower().startswith("also "):
-        inner = inner[5:].strip()
-    elif inner.lower() == "also":
-        return []
-    return [p.strip() for p in inner.split(",") if p.strip()]
+    return clean_forms(inner.split(","), headword)
 
 
 def new_entry(pageno, starts):
@@ -378,8 +388,9 @@ def main():
                     if cur["paren"] is not None:
                         cur["paren"] += " " + t1
                         if t1.rstrip().endswith(")"):
+                            hw = cur["variants"][0][0] if cur["variants"] else ""
                             cur["forms"].extend(
-                                parse_paren_forms(cur["paren"]))
+                                parse_paren_forms(cur["paren"], hw))
                             cur["paren"] = None
                     elif BARE_POS_RE.match(t1):
                         pos = BARE_POS_RE.match(t1).group(1)
@@ -399,15 +410,18 @@ def main():
                     elif t1.startswith("("):
                         cur["paren"] = t1
                         if t1.rstrip().endswith(")"):
-                            cur["forms"].extend(parse_paren_forms(t1))
+                            hw = cur["variants"][0][0] if cur["variants"] else ""
+                            cur["forms"].extend(parse_paren_forms(t1, hw))
                             cur["paren"] = None
-                    elif is_note(t1):
-                        pass  # writer guidance, not lexical data
-                    elif FORMS_RE.match(t1):
-                        cur["forms"].extend(split_forms(t1))
                     else:
-                        warnings.append(f"unhandled word cell p{pageno}: "
-                                        f"{t1!r}")
+                        # Try as forms; case filter drops metalanguage.
+                        # "No other verb" (sentence-case) and "forms."
+                        # (trailing period) yield nothing -> silently ignored.
+                        hw = cur["variants"][0][0] if cur["variants"] else ""
+                        forms = split_forms(t1, hw)
+                        if forms:
+                            cur["forms"].extend(forms)
+                        # else: note fragment or unparseable; ignore
                 if bparts:
                     cur["bodies"].append(bparts)
     if cur:

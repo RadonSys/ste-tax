@@ -3,7 +3,7 @@
 Instrument for the design's Watermark axis (docs/design.md): does an
 ASD-STE100 vocabulary constraint lower watermark detection at matched
 length? Code: `eval/watermark.py`. Tests: `tests/test_watermark.py`.
-Run: `eval/harness.py --watermark` (hf backend). Bracketed numbers cite
+Run: `python -m eval run --watermark --backend hf`. Bracketed numbers cite
 docs/lit-review.md, Included papers. `[Sn]` cite the Sources table below.
 
 ## Scheme as implemented

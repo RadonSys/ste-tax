@@ -1,7 +1,13 @@
 # Experiment plan: models, hardware, protocol
 
 Companion to docs/design.md and docs/intervention-pin.md. This file pins
-the base models and the run procedure. The harness is eval/harness.py.
+the base models and the protocol. Harness: eval/README.md. Procedure on
+the nodes: docs/runbook.md. Reconciled 2026-10-08 with
+docs/fact-check-hardware.md, docs/advisor-review.md,
+docs/lit-review-reasoning-cost.md, and docs/checker-validation.md.
+Closest prior work and the gap this plan targets (tokens, reasoning,
+latency, STE Issue 9, intervention comparison): docs/lit-review-cnl.md,
+summarized in docs/design.md.
 
 ## Models
 
@@ -33,9 +39,10 @@ Why this pair:
   `enable_thinking` switches it per request, so a thinking-off control
   costs no extra model. Qwen3.8 also exposes `reasoning_effort`.
 - vLLM lists the architecture (Qwen3_5ForConditionalGeneration) as
-  supported, and the Qwen3.8-27B card links an official vLLM recipe.
-  The architecture predates the pinned ROCm vLLM build; no new arch
-  support is needed for the 3.8 checkpoint itself.
+  supported, and the Qwen3.8-27B card links an official vLLM recipe
+  (`min_vllm_version` 0.17.0). That recipe verifies no AMD GPU. No AMD
+  validation of Qwen3.8-27B exists; the MI350X smoke test is the first
+  (docs/dcs-amd-hardware.md, section 4).
 
 Cross-family option, not in the primary pair:
 
@@ -47,7 +54,7 @@ Cross-family option, not in the primary pair:
   gfx950 are the least settled part of the stack, its card warned
   vLLM support was main-branch-only at release, and no MI350X
   validation was found. Status: optional third model for family
-  robustness, gated on a gfx950 smoke test under the pinned vLLM.
+  robustness, gated on a gfx950 smoke test under the image's vLLM.
 
 Excluded:
 
@@ -62,61 +69,80 @@ Excluded:
 
 ## Hardware fit (DCS AMD donation)
 
-Full hardware analysis, run procedure, and pre-flight checks:
-docs/dcs-amd-hardware.md. Summary:
+Hardware and stack facts: docs/dcs-amd-hardware.md. Procedure:
+docs/runbook.md. Summary:
 
-- MI350X: 288 GB HBM3E per GPU, 8 per node, gfx950, ROCm 7 with
-  vLLM 0.23. The Qwen3.8-27B checkpoint is 55.6 GB in BF16: one GPU,
-  large KV headroom. No tensor parallelism, no quantization; BF16
-  only, so quantization is not a confound.
-- MI100 node: 32 GB per GPU. Qwen3.5-9B in BF16 (19.3 GB) fits one
-  GPU with about 11 GB to spare for KV. Use the MI100 node for
-  bring-up and the small model; MI350X for the main runs.
+- MI350X: 288 GB HBM3E per GPU, 8 per node, gfx950. Stack: AMD's ROCm
+  vLLM Docker image. ROCm 10.1.0 (2026-10-05) ships vLLM 0.29.0;
+  upstream vLLM is 0.31.0. Expect vLLM 0.29 or newer and record the
+  exact version. The Qwen3.8-27B checkpoint is 55.6 GB in BF16: one
+  GPU, large KV headroom. No tensor parallelism, no quantization.
+- MI100 node: 32 GB per GPU. gfx908 is outside vLLM's and AITER's GPU
+  lists. It runs the `hf` backend for plumbing only, never a reported
+  number. (Qwen3.5-9B in BF16 leaves about 9.5 GB for KV there.)
 - Access status: allocation not yet in hand. Path is PI sponsorship
-  (faculty ask) plus account provisioning via the AMD lab manager.
-  Everything below runs the day access lands.
+  plus account provisioning via the AMD lab manager. Questions for the
+  lab manager: docs/runbook.md, section 0.
 
-## Protocol (preliminary)
+## Protocol
 
-- Tasks: eval/tasks.jsonl, 22 starter tasks. 12 math word problems and
-  8 factual QA with checkable answers; 2 technical-writing prompts,
-  unscored, used for compliance, cost, and the watermark runs. This set
-  is a plumbing test, not a benchmark. Before any claim, expand with
-  standard subsets (GSM8K, MMLU) and more writing tasks.
+- Tasks (docs/tasks.md):
+  - Cost axis (claim 1): `eval/tasks/gsm8k_full.jsonl`, all 1319 GSM8K
+    test items. Power: sd of log reasoning tokens about 0.95 (arXiv
+    2511.04108, Table 5, lognormal conversion by the review), n = 1108
+    for a 10% effect at alpha 0.05/4.
+  - Accuracy (claim 3): `eval/tasks/math500.jsonl`, 200 numeric-answer
+    MATH-500 items. GSM8K is saturated. At n = 200, power for a
+    5-point drop is 0.36 per sample; more items need the 318-item
+    numeric pool or symbolic answer checking.
+  - `eval/tasks/nq_open.jsonl` (400) as is; `eval/tasks/writing.jsonl`
+    (26) for compliance and cost; `eval/tasks.jsonl` (22) is the
+    plumbing set, never pooled with the benchmarks.
 - Arms in pin order: A0 free-form, A2 post-hoc rewrite, A1 prompt
-  instruction with the approved list attached. Temperature 0,
-  max 1024 new tokens, seed 0.
-- Metrics per task and arm: accuracy on the final text, reasoning
-  tokens (think segment), generated tokens, latency, compliance rate
-  (validate.py trie over data/lexicon.json), degeneracy flag. Summary
-  prints per-arm means and the tax as A1-A0 and A2-A0 deltas.
-- Watermark: eval/harness.py --watermark (hf backend). Green-list
-  watermark, gamma 0.25, delta 2.0, temperature 0.7, on the writing
-  tasks, A0 vs A1, z-scores at full and matched length.
+  instruction with the approved list attached.
+- Decoding (default `--decoding thinking`): the Qwen3.8-27B card's
+  thinking-mode sampling, temperature 1.0, top-p 0.95, top-k 20
+  (huggingface.co/Qwen/Qwen3.8-27B, Best Practices, retrieved
+  2026-10-08); `--max-new-tokens` 16384; k = 3 samples per task and
+  arm, sample s seeded with seed + s. Both sizes run the same settings:
+  the Qwen3.5-9B card's general thinking set adds presence_penalty 1.5,
+  not used, so the size contrast has one sampler. `--decoding greedy`
+  (temperature 0, 1024 new tokens, one sample) is the plumbing setting:
+  the cap truncates thinking output, so its token counts measure the
+  cap. Never a reported number.
+- Metrics per task, arm, and sample: accuracy on the final text,
+  reasoning tokens (think segment), generated tokens, latency, naive
+  compliance, checker raw `ok`, checker `gate_ok`, degeneracy and
+  truncation flags. Summary per arm: mean±sd over the k samples, then
+  the tax as A1-A0 and A2-A0 deltas.
+- Compliance: report `gate_ok` (docs/checker-validation.md, gate row
+  4) with its 4.4% STE false-reject floor and 89.1% headword recall.
+  Absolute rates from raw `ok` are invalid: it rejects 44.8% of the
+  spec's own STE examples. Arm comparisons under one checker and one
+  allow list stand.
+- Prefix caching: off by default (cold-prompt cost). Claim 6 (advisor
+  review): run the cost set once more with `--prefix-caching` and
+  report both.
+- Watermark axis: on hold until claim 1 returns (docs/advisor-review.md,
+  Direction). docs/watermark.md recommends EWD detection and a
+  unique-pair z beside the raw z; referenced here, not implemented.
+  The existing `run --watermark` path (hf backend, KGW, gamma 0.25,
+  delta 2.0) stays as built.
 
 ## Run commands
 
-Entry point is now `python -m eval run`, from the repo root. Current commands: eval/README.md.
-
 Local plumbing test (no model):
 
-    python3 eval/harness.py --backend mock
+    uv run python -m eval run --backend mock --decoding greedy
 
-Local real-model smoke (CPU works, slow; fixture only, not an
-experiment model):
+Local real-model smoke (CPU, fixture model only, not an experiment
+model):
 
-    uv run --with transformers --with torch --with accelerate \
-      python eval/harness.py --backend hf \
-      --model Qwen/Qwen3.5-0.8B --limit 2 --max-new-tokens 192
+    uv run --extra hf python -m eval run --backend hf \
+      --model Qwen/Qwen3.5-0.8B --limit 2 --decoding greedy --max-new-tokens 192
 
-Cluster (inside the ROCm/vLLM environment on a DCS node):
-
-    git clone --recurse-submodules https://github.com/RadonSys/ste-tax.git
-    cd ste-tax
-    python eval/harness.py --backend vllm --model Qwen/Qwen3.8-27B
-    python eval/harness.py --backend vllm --model Qwen/Qwen3.5-9B
-
-Results land in eval/results/*.jsonl, one record per task and arm.
+Cluster: docs/runbook.md, sections 4 and 5. Results land in
+`eval/results/<run-id>/`, one record per task, sample, and arm.
 
 ## Known limits of the preliminary code
 
@@ -125,7 +151,9 @@ Results land in eval/results/*.jsonl, one record per task and arm.
 - A1 attaches the approved id list (879 entries), not the full
   dictionary text. The pin says "with the dictionary attached"; the id
   list is the compact form. Flagged as a design choice to revisit.
-- The compliance checker is the naive vocabulary check: necessary, not
-  sufficient (no POS, meaning, or rule checks). See scripts/validate.py.
+- Compliance has three numbers: the naive vocabulary rate
+  (scripts/validate.py), the asd-ste100 checker's raw `ok`, and the
+  validated `gate_ok`. None examines meaning (rule 1.3). The gate's H
+  list is in-sample (docs/checker-validation.md, Limits).
 - Watermark bias is implemented for the hf backend only. vLLM raises
   NotImplementedError for the watermark processor.

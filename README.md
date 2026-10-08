@@ -12,8 +12,8 @@ forcing LLM output into STE meaningfully affects three axes:
 
 1. **Intelligence.** Task accuracy and output quality under STE constraint
    vs free-form generation on the same tasks.
-2. **Cost.** Tokens (output + reasoning), latency, and spend required to
-   reach STE-compliant output.
+2. **Cost.** Tokens (output + reasoning) and latency required to reach
+   STE-compliant output, on local open-weight models.
 3. **Watermark.** Detectability of statistical output watermarks under
    STE's constrained vocabulary.
 
@@ -28,10 +28,25 @@ forcing LLM output into STE meaningfully affects three axes:
 
 ## Design
 
-See `docs/design.md`. The intervention must be pinned first (prompt
-instruction vs fine-tuning vs constrained decoding vs post-hoc rewrite),
-because H1/H0 discriminate cleanly only under some of these. Compliance
-needs a checker built from the extracted dictionary in `data/`.
+See `docs/design.md` (prior work and gap, axes, checker) and
+`docs/intervention-pin.md` (arms A0 free-form, A2 post-hoc rewrite, A1
+prompt instruction). Models: Qwen3.8-27B and Qwen3.5-9B on one AMD
+MI350X each (`docs/experiment-plan.md`, `docs/dcs-amd-hardware.md`).
+Cost runs the full GSM8K test split; accuracy a 200-item MATH-500
+sample (`docs/tasks.md`). Decoding: the vendor's thinking-mode
+sampling, 16384 new tokens, 3 samples per task. Compliance: the
+asd-ste100 checker, reported as the validated `gate_ok` beside raw `ok`
+(`docs/checker-validation.md`). The watermark axis waits for the cost
+result (`docs/advisor-review.md`).
+
+## Run
+
+    git clone --recurse-submodules https://github.com/RadonSys/ste-tax.git
+    uv run python -m eval run --backend mock --decoding greedy   # plumbing
+    uv run pytest
+
+On the DCS nodes: `docs/runbook.md`. Harness reference:
+`eval/README.md`.
 
 ## Repo layout
 
@@ -51,7 +66,15 @@ needs a checker built from the extracted dictionary in `data/`.
 - `scripts/build.py`: builds `data/`. Run: `uv run scripts/build.py`
   (uv reads `pyproject.toml`, pymupdf pinned in `uv.lock`).
 - `scripts/verify.py`: checks `data/`. Run: `uv run scripts/verify.py`.
-- `docs/`: research design notes.
+- `scripts/checker_validation.py`: validates the asd-ste100 checker on
+  the spec's own examples (`docs/checker-validation.md`).
+- `eval/`: the harness (`python -m eval`), task files under
+  `eval/tasks/`, the gate's H list `eval/gate_h.json`.
+- `tests/`: pytest suite for the harness.
+- `.github/skills`: the SKILLs repository as a submodule; the checker
+  lives at `asd-ste100/`.
+- `docs/`: design, plan, runbook, hardware, tasks, reviews, and
+  `docs/friction/` ledgers.
 
 ## License
 

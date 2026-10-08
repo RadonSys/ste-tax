@@ -1,8 +1,8 @@
 # eval
 
 Eval harness for the STE-tax experiment. Design: ../docs/design.md,
-../docs/intervention-pin.md, ../docs/experiment-plan.md. Hardware and
-cluster procedure: ../docs/dcs-amd-hardware.md.
+../docs/intervention-pin.md, ../docs/experiment-plan.md. Hardware:
+../docs/dcs-amd-hardware.md. Node procedure: ../docs/runbook.md.
 
 ## Run
 
@@ -11,7 +11,7 @@ the mock backend need the standard library only, so `python3 -m eval`
 runs without uv inside the ROCm image (a test guards the imports).
 
     uv run python -m eval tasks                        # validate task files
-    uv run python -m eval run --backend mock           # plumbing test
+    uv run python -m eval run --backend mock --decoding greedy  # plumbing test
     uv run python -m eval summarize eval/results/<run-id>
     uv run python -m eval rescore eval/results/<run-id>
     uv run pytest
@@ -19,7 +19,7 @@ runs without uv inside the ROCm image (a test guards the imports).
 Real-model smoke on CPU (fixture model only, never on the dev box):
 
     uv run --extra hf python -m eval run --backend hf \
-      --model Qwen/Qwen3.5-0.8B --limit 2 --max-new-tokens 192
+      --model Qwen/Qwen3.5-0.8B --limit 2 --decoding greedy --max-new-tokens 192
 
 Node pre-flight, inside the image. Writes
 `eval/results/preflight-<host>-<UTC>.json` (or `--out`); exit 1 when a
@@ -31,8 +31,11 @@ older than 0.29, gfx908 for vllm):
 Cluster, inside AMD's ROCm vLLM image (vllm comes from the image. This
 project has no vllm extra, because the PyPI wheel targets CUDA):
 
-    python3 -m eval run --backend vllm --model Qwen/Qwen3.5-9B --limit 3 --checker off
-    python3 -m eval run --backend vllm --model Qwen/Qwen3.8-27B --checker off
+    python3 -m eval run --backend vllm --model $STORE/Qwen3.5-9B --limit 3 --samples 1 --checker off
+    python3 -m eval run --backend vllm --model $STORE/Qwen3.8-27B \
+      --tasks eval/tasks/gsm8k_full.jsonl --checker off
+
+Full command list per model and node: ../docs/runbook.md.
 
 Then copy `eval/results/<run-id>/` to a machine with uv and network, and
 run `rescore`. With uv and network on the node, drop `--checker off`.

@@ -7,7 +7,9 @@ Pin two arms before any measurement. Run all three axes on each arm.
 - **A0: free-form baseline.** Same tasks, no STE instruction. Anchor for
   all comparisons.
 - **A1: prompt instruction.** System prompt: "write in ASD-STE100 STE",
-  with the dictionary attached. Measures the realistic deployment path.
+  with the dictionary attached (as built: the 879 approved ids).
+  Measures the realistic deployment path only with both prefix-caching
+  numbers reported, cold and cached (docs/advisor-review.md, claim 6).
 - **A2: post-hoc rewrite.** Free-form draft first, second pass rewrites it
   into STE. Holds reasoning fixed. Isolates the compliance tax. Cleanest
   H1/H0 discriminator.
@@ -38,8 +40,12 @@ tests whether asking upfront costs more or less than fixing after.
   circumlocuting. Record refusal/degeneracy as a third outcome, not as
   low accuracy.
 - Checker risk: the checker defines compliance. Arm comparisons survive
-  checker error, but absolute compliance rates do not. Validate the
-  checker on a hand-labeled sample before trusting absolutes.
+  checker error, but absolute compliance rates do not. Validated on the
+  spec's own examples (docs/checker-validation.md): raw `ok` rejects
+  44.8% of STE examples, invalid as an absolute rate; the gate the
+  harness reports as `gate_ok` rejects 4.4% at 89.1% headword recall.
+  A hand-labeled sample of model output is still open (advisor review,
+  claim 7).
 
 ## What would kill the design
 
@@ -47,10 +53,12 @@ If A2 cost is about equal to A0 cost with equal quality, H0 wins under
 the cleanest arm. Then A1 noncompliance is an instruction-following
 artifact, not a thinking tax. Stop there.
 
-## Open decisions
+## Decisions
 
-1. Approve arm order A0/A2/A1, or reorder.
-2. Task suite. Suggestion: checkable QA benchmarks plus one open-ended
-   technical-writing task.
-3. Model set. Suggestion: one frontier reasoning model plus one smaller
-   model, to test whether the tax scales with size.
+1. Arm order A0/A2/A1: as built in the harness.
+2. Task suite: full GSM8K test split for cost, a 200-item MATH-500
+   sample for accuracy, NQ-open, 26 technical-writing prompts
+   (docs/tasks.md).
+3. Model set: Qwen3.8-27B and Qwen3.5-9B, open weights, one tokenizer
+   (docs/experiment-plan.md). Open: a frontier closed model needs API
+   spend outside the current envelope (docs/advisor-review.md, Ask).

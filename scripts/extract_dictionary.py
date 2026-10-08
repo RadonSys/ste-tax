@@ -560,7 +560,8 @@ class Index:
 
 def lexicon_of(entries: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Approved words with every form, lowercased; unapproved words with
-    their alternatives as ids into the approved list."""
+    their alternatives as ids into the approved list, and the spec's help
+    text, the only guidance where an entry lists no alternative."""
     approved = [
         {
             "id": lexicon_id(e["word"], e["pos"]),
@@ -581,6 +582,7 @@ def lexicon_of(entries: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "forms": [f.lower() for f in e["forms"]],
             "alternatives": [index.resolve(a) for a in e["status"]["alternatives"]],
             "note": e["status"]["note"],
+            "help": e["status"]["help"],
         }
         for e in entries
         if e["status"]["kind"] == "unapproved"

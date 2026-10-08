@@ -44,7 +44,7 @@ needs a checker built from the extracted dictionary in `data/`.
     qualifier, forms, approved meaning or alternatives, help, examples.
   - `lexicon.json`: compact, lowercase lexicon for a checker: approved
     words with every form, and unapproved words mapped to approved
-    alternatives.
+    alternatives, with the spec's help text.
   - `rules.json`: the 53 writing rules of Part 1 with a paraphrase and the
     parameters a checker can enforce.
   - `manifest.json`: SHA-256 and byte size of each artifact.

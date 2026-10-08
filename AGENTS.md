@@ -43,7 +43,8 @@ Every file: `schema_version` (1) and `source` (title, issue 9, date
 - `lexicon.json`: lowercase. `approved`: id `"word (pos)"`, forms,
   derived `plural` for nouns. `unapproved`: alternatives as `ref` to an
   approved id (with `form` or `stated_pos` when the spec names a form or
-  a different pos), `technical`, or `phrase`.
+  a different pos), `technical`, or `phrase`; `help` is the spec's help
+  text, the only guidance for an entry with no alternative.
 - `rules.json`: 53 rules: id, section, title, paraphrase, check kind,
   parameters.
 - `manifest.json`: path, SHA-256, bytes of each artifact.

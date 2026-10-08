@@ -15,8 +15,8 @@
   },
   {
    "path": "data/lexicon.json",
-   "sha256": "832fe6c7dcec07f64ca98e238bdb5c755db500f8f8f568295d2431e9d1836c52",
-   "bytes": 360956
+   "sha256": "45ae4c8b9478f4ef770c8c8a93d0a96620879c9660203ca2cb7f363bf39ef535",
+   "bytes": 385803
   },
   {
    "path": "data/rules.json",

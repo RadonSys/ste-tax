@@ -56,9 +56,14 @@ POS_TAGS = ("n", "v", "adj", "adv", "prep", "pron", "art", "conj")
 # The eight parts of speech of the spec, plus the one affix entry it lists
 # in the same column: "re- (prefix)", not approved.
 HEAD_TAGS = (*POS_TAGS, "prefix")
+BLANK_PAGE = ("Blank", "Page")
 HEADER = ("Word", "Approved", "STE", "Non-STE")
 PAGE_LABEL = re.compile(r"Page (2-1-[A-Z]\d+)")
-COLUMN_SLACK = 10.0  # pt a cell may sit left of its header word
+# pt a cell may sit left of its header word. Measured on Issue 9: STE
+# cells start 7 to 9 left of "STE", Non-STE cells 9 to 10.1 left of
+# "Non-STE" (page 2-1-C24: "Curve" at 407.6 under a header at 417.7).
+# The STE column ends at 400 or less, so 12 keeps the columns apart.
+COLUMN_SLACK = 12.0
 # pt past the column-2 start that marks help text. Measured on Issue 9:
 # wrapped numbered senses sit at 12 to 27, help text at 30 to 43.
 HELP_INDENT = 29.0
@@ -182,6 +187,10 @@ def read_page(label: str, page: pymupdf.Page) -> Page:
             lines.setdefault((b_no, l_no), []).append((x0, y0, x1, text))
     if set(starts) != set(HEADER):
         raise ParseError(f"header row missing: {sorted(starts)}")
+    # A blank page keeps its page label and prints "Blank Page" in the
+    # body; without this, the words join the last entry's examples.
+    if sorted(t for ws in lines.values() for *_, t in ws) == sorted(BLANK_PAGE):
+        lines = {}
     words = []
     for key, ws in lines.items():
         line_spans = spans[key]

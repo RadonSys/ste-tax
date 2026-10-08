@@ -9810,8 +9810,8 @@
     "help": null,
     "note": null
    },
-   "ste_example": "BEND THE STRIP OF Curve METAL TO MAKE A CURVE.",
-   "nonste_example": "the strip of metal.",
+   "ste_example": "BEND THE STRIP OF METAL TO MAKE A CURVE.",
+   "nonste_example": "Curve the strip of metal.",
    "page": "2-1-C24"
   },
   {
@@ -9866,8 +9866,8 @@
     "help": null,
     "note": null
    },
-   "ste_example": "OPERATE THE Cycle ACTUATOR THROUGH times. THREE CYCLES.",
-   "nonste_example": "the actuator three",
+   "ste_example": "OPERATE THE ACTUATOR THROUGH THREE CYCLES.",
+   "nonste_example": "Cycle the actuator three times.",
    "page": "2-1-C24"
   },
   {
@@ -13045,7 +13045,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "APPLY TALCUM POWDER TO THE AREA. Blank Page",
+   "ste_example": "APPLY TALCUM POWDER TO THE AREA.",
    "nonste_example": "Dust the area with talcum powder.",
    "page": "2-1-D19"
   },
@@ -20938,7 +20938,7 @@
     "help": null,
     "alternatives": []
    },
-   "ste_example": "MAKE SURE THAT THE LINES ARE HYDRAULICALLY OPERATED. Blank Page",
+   "ste_example": "MAKE SURE THAT THE LINES ARE HYDRAULICALLY OPERATED.",
    "nonste_example": null,
    "page": "2-1-H7"
   },
@@ -23553,7 +23553,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "KEEP THE RING IMMEDIATELY ABOVE THE JACK COLLARS. Blank Page",
+   "ste_example": "KEEP THE RING IMMEDIATELY ABOVE THE JACK COLLARS.",
    "nonste_example": "Keep the ring just above the jack collars.",
    "page": "2-1-J1"
   },
@@ -23704,7 +23704,7 @@
     "help": null,
     "alternatives": []
    },
-   "ste_example": "IF YOU KNOW THE CLEARANCE, YOU CAN CALCULATE THE THICKNESS OF THE WASHER. Blank Page",
+   "ste_example": "IF YOU KNOW THE CLEARANCE, YOU CAN CALCULATE THE THICKNESS OF THE WASHER.",
    "nonste_example": null,
    "page": "2-1-K1"
   },
@@ -29107,7 +29107,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "DO NOT TIGHTEN THE FITTINGS TOO MUCH. DO NOT MAKE THE FITTINGS TOO TIGHT. DO NOT INSTALL THE FITTINGS TOO TIGHTLY. Blank Page",
+   "ste_example": "DO NOT TIGHTEN THE FITTINGS TOO MUCH. DO NOT MAKE THE FITTINGS TOO TIGHT. DO NOT INSTALL THE FITTINGS TOO TIGHTLY.",
    "nonste_example": "Do not overtighten the fittings. Do not overtighten the fittings. Do not overtighten the fittings.",
    "page": "2-1-O9"
   },
@@ -32308,7 +32308,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "THE TABLE GIVES THE MAXIMUM TOLERANCE FOR THE HOLE. Blank Page",
+   "ste_example": "THE TABLE GIVES THE MAXIMUM TOLERANCE FOR THE HOLE.",
    "nonste_example": "The table quotes the maximum tolerance for the hole.",
    "page": "2-1-Q1"
   },
@@ -35813,7 +35813,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "FLUSH THE PIPES WITH WATER. Blank Page",
+   "ste_example": "FLUSH THE PIPES WITH WATER.",
    "nonste_example": "Clean the pipes with running water.",
    "page": "2-1-R17"
   },
@@ -43487,7 +43487,7 @@
     "help": null,
     "alternatives": []
    },
-   "ste_example": "THIS INSTALLATION PROCEDURE IS TYPICAL FOR THIS TYPE OF FASTENER. Blank Page",
+   "ste_example": "THIS INSTALLATION PROCEDURE IS TYPICAL FOR THIS TYPE OF FASTENER.",
    "nonste_example": null,
    "page": "2-1-T13"
   },
@@ -46651,7 +46651,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "IF THE HOSES ARE INCORRECTLY INSTALLED, DAMAGE CAN OCCUR. Blank Page",
+   "ste_example": "IF THE HOSES ARE INCORRECTLY INSTALLED, DAMAGE CAN OCCUR.",
    "nonste_example": "Damage can occur if hoses are wrongly installed.",
    "page": "2-1-W7"
   },
@@ -46783,7 +46783,7 @@
     "help": null,
     "note": null
    },
-   "ste_example": "ADJUST THE METER TO ZERO. Blank Page",
+   "ste_example": "ADJUST THE METER TO ZERO.",
    "nonste_example": "Zero the meter.",
    "page": "2-1-Y1"
   }

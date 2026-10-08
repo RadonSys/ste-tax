@@ -10,8 +10,8 @@
  "artifacts": [
   {
    "path": "data/dictionary.json",
-   "sha256": "b6f9c6065f6899c0a3df033b01f49793c2fb0e6083af171fa7ea64a2b6b124e1",
-   "bytes": 1064893
+   "sha256": "1ece16ede615656ae790c3261dc21d486fdc9d8957231714fb25d12ae7b2af5f",
+   "bytes": 1064783
   },
   {
    "path": "data/lexicon.json",

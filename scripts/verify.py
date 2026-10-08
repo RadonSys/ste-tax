@@ -10,6 +10,9 @@ Checks:
 - every artifact: schema_version and the source block, PDF digest included
 - dictionary: approved iff the headword is uppercase; key (word, pos,
   qualifier) unique; pos from the closed set
+- examples: no "Blank Page" text; each STE example word with a lowercase
+  letter is a unit, "No.", or a list label such as "(a)", so a Non-STE
+  word that crosses the column split fails
 - lexicon: approved words are the dictionary's uppercase headwords
   lowercased, with lowercase forms; ids unique; each unapproved entry
   carries the dictionary's help, and one with no alternative has help
@@ -284,6 +287,27 @@ def counts(entries: list[dict[str, Any]]) -> Iterator[str]:
     yield f"headwords the spec prints with no part of speech: {untagged}"
 
 
+# Lowercase is legal in an STE example only in these words of Issue 9.
+LOWER = re.compile(r"[a-z]")
+STE_LOWER = re.compile(r"\(?(?:mm|ml|kPa|bar|mbar|psi|MHz|Hz|kg|Nm|lb|in|µm|No|[a-z])[).,]*")
+
+
+def check_examples(entries: list[dict[str, Any]]) -> Failures:
+    out = []
+    for e in entries:
+        texts = [t for t in (e["ste_example"], e["nonste_example"]) if t]
+        if any("Blank Page" in t for t in texts):
+            out.append(f"{e['word']!r}: example holds 'Blank Page'")
+        stray = [
+            w
+            for w in (e["ste_example"] or "").split()
+            if LOWER.search(w) and not STE_LOWER.fullmatch(w)
+        ]
+        if stray:
+            out.append(f"{e['word']!r}: STE example has lowercase words {stray}")
+    return out
+
+
 def main() -> int:
     failures: Failures = []
     _, manifest = load("manifest.json")
@@ -300,6 +324,7 @@ def main() -> int:
     pdf = pymupdf.open(spec.PDF)
     part1 = part1_text(pdf)
     failures += check_dictionary(entries)
+    failures += check_examples(entries)
     failures += check_lexicon(entries, lexicon)
     failures += check_references(entries, lexicon)
     failures += check_verbs(entries, approved_verb_list(pdf))

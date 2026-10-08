@@ -1,7 +1,7 @@
 # Task suite
 
-Companion to docs/experiment-plan.md (Protocol). Schema and harness:
-eval/harness.py. One JSON object per line, fields in this order: `id`,
+Companion to docs/experiment-plan.md (Protocol). Schema: eval/README.md
+and eval/records.py. One JSON object per line, fields in this order: `id`,
 `kind` (`math`, `qa`, `writing`), `prompt`, `answer` (number for math,
 string for qa, null for writing), `technical_terms`, `source`, `split`,
 `license`. Ids are unique across all files.
@@ -10,7 +10,8 @@ string for qa, null for writing), `technical_terms`, `source`, `split`,
 
 | File | Kind | Count | Source | Split | License |
 | --- | --- | --- | --- | --- | --- |
-| eval/tasks/gsm8k.jsonl | math | 400 | GSM8K | test | MIT |
+| eval/tasks/gsm8k_full.jsonl | math | 1319 | GSM8K | test | MIT |
+| eval/tasks/math500.jsonl | math | 200 | MATH-500 (PRM800K) | test | MIT |
 | eval/tasks/nq_open.jsonl | qa | 400 | NQ-open | dev | CC BY-SA 3.0 |
 | eval/tasks/writing.jsonl | writing | 26 | handwritten | writing | MIT |
 | eval/tasks.jsonl | math, qa, writing | 12, 8, 2 | handwritten | starter | MIT |
@@ -18,8 +19,14 @@ string for qa, null for writing), `technical_terms`, `source`, `split`,
 - `eval/tasks.jsonl` stays at its path: the harness reads it by
   default. It is the plumbing test. Do not pool it with the benchmark
   subsets in a claim.
+- Roles: `gsm8k_full.jsonl` carries the cost axis (claim 1, token
+  cost). `math500.jsonl` carries the accuracy claim: GSM8K is
+  saturated (docs/advisor-review.md). NQ-open stays as it is.
 - Run a benchmark file with `--tasks`, for example
-  `python eval/harness.py --backend vllm --model M --tasks eval/tasks/gsm8k.jsonl`.
+  `python3 -m eval run --backend vllm --model M --tasks eval/tasks/gsm8k_full.jsonl`.
+- `gsm8k_full.jsonl` replaces the 400-item `gsm8k.jsonl` of the first
+  build. The 400 items are a subset, byte-equal per record; the two
+  files together break id uniqueness, so the old file is gone.
 - Writing tasks: 14 procedures (`techwrite-pNN`, numbered steps) and 12
   descriptions (`techwrite-dNN`, no instructions). Domains: vehicles,
   workshop tools, home systems, electrical safety, one aircraft system.
@@ -32,11 +39,15 @@ string for qa, null for writing), `technical_terms`, `source`, `split`,
 | Name | URL | Commit | SHA-256 | Bytes | Lines |
 | --- | --- | --- | --- | --- | --- |
 | GSM8K test | https://raw.githubusercontent.com/openai/grade-school-math/3101c7d5072418e28b9008a6636bde82a006892c/grade_school_math/data/test.jsonl | 3101c7d5072418e28b9008a6636bde82a006892c | 3730d312f6e3440559ace48831e51066acaca737f6eabec99bccb9e4b3c39d14 | 749738 | 1319 |
+| MATH-500 (PRM800K test) | https://media.githubusercontent.com/media/openai/prm800k/7ecc794703b2877f63226f2477a49b34f9b25163/prm800k/math_splits/test.jsonl | 7ecc794703b2877f63226f2477a49b34f9b25163 | 35dc41080a3680858b27fa7e0533d2d547825316fc5dafe5d316f4ccc5a06132 | 446564 | 500 |
 | NQ-open dev | https://raw.githubusercontent.com/google-research-datasets/natural-questions/fb26a3073b1fe636c97302890a27b491d6530130/nq_open/NQ-open.dev.jsonl | fb26a3073b1fe636c97302890a27b491d6530130 | f15567f38099f3615f5b8a685c0aef449c11ad90d3da3735e8d1b98115b40616 | 391316 | 3610 |
 
-Fetched 2026-10-08. Only the samples are in the repository. License
+Fetched 2026-10-08. Only the samples are in the repository. The
+PRM800K file is a Git LFS object: the raw URL gives a 131-byte pointer
+whose `oid` is the SHA-256 above; the media URL gives the file. License
 files: eval/tasks/LICENSE.gsm8k (upstream MIT text, copyright 2021
-OpenAI), eval/tasks/LICENSE.nq-open (attribution, CC BY-SA 3.0 pointer,
+OpenAI), eval/tasks/LICENSE.math500 (PRM800K MIT text, copyright 2023
+OpenAI; MATH problems, MIT), eval/tasks/LICENSE.nq-open (attribution, CC BY-SA 3.0 pointer,
 list of changes). nq_open.jsonl is an adaptation under CC BY-SA 3.0;
 keep it under that license.
 
@@ -48,29 +59,43 @@ is hidden.
 eval/tasks/build.py, standard library only:
 
 1. Read each upstream file. Stop if its SHA-256 differs from the pin.
-2. GSM8K: candidates = all 1319 lines. Gold = text after `####`, commas
+2. GSM8K: all 1319 lines, no draw. Gold = text after `####`, commas
    removed; integer when whole. Every gold is numeric (checked).
 3. NQ-open: candidates = lines with exactly one annotated answer (2076)
    and no time-dated word in the question (`last`, `latest`, `current`,
    `currently`, `now`, `recent`, `recently`, `this year`, `today`,
    `newest`): 1959 remain. Reasons: the schema holds one gold string;
    the answers are frozen at 2018 annotation. Prompt = question + `?`.
-4. Draw 400 with `random.Random(0).sample(sorted(candidates), 400)`.
-   Sort by upstream line index. Id = source, split, zero-padded line
-   index (`gsm8k-test-0042`, `nq-open-dev-0123`), so each task traces to
-   its upstream line.
+4. MATH-500: candidates = lines whose `answer` is a plain number,
+   optionally with thousands commas (318 of 500). Symbolic answers
+   (fractions, radicals, tuples, intervals, degrees) leave the pool:
+   the harness math check compares one number. Bias: the pool is
+   slightly easier (level 5 is 24% of it, 27% of MATH-500). Prompt =
+   `problem` + the math suffix. Gold = `answer` as a number.
+5. NQ-open: draw 400 with
+   `random.Random(0).sample(sorted(candidates), 400)`. MATH-500: draw
+   200 the same way. Sort by upstream line index. Id = source, split,
+   zero-padded line index (`gsm8k-test-0042`, `math500-test-0003`,
+   `nq-open-dev-0123`), so each task traces to its upstream line.
 
 Same inputs give byte-identical output (checked: two runs, same
-SHA-256).
+SHA-256). Outputs, build of 2026-10-08:
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| eval/tasks/gsm8k_full.jsonl | 589980 | b094951380c0ad1d8ac9a1c27134cbcc03658ee27e9b1431c66846242b6f5897 |
+| eval/tasks/math500.jsonl | 81479 | 43817ea7725fa1484ae8abaa33e6c4b226763f4a543f8df5d966d5a21c78b884 |
 
 ## Regenerate
 
     mkdir -p /tmp/up && cd /tmp/up
     curl -sSfO https://raw.githubusercontent.com/openai/grade-school-math/3101c7d5072418e28b9008a6636bde82a006892c/grade_school_math/data/test.jsonl
     curl -sSfO https://raw.githubusercontent.com/google-research-datasets/natural-questions/fb26a3073b1fe636c97302890a27b491d6530130/nq_open/NQ-open.dev.jsonl
-    sha256sum test.jsonl NQ-open.dev.jsonl
+    curl -sSf -o math500.test.jsonl https://media.githubusercontent.com/media/openai/prm800k/7ecc794703b2877f63226f2477a49b34f9b25163/prm800k/math_splits/test.jsonl
+    sha256sum test.jsonl NQ-open.dev.jsonl math500.test.jsonl
     cd -
-    python3 eval/tasks/build.py --gsm8k /tmp/up/test.jsonl --nq-open /tmp/up/NQ-open.dev.jsonl
+    python3 eval/tasks/build.py --gsm8k /tmp/up/test.jsonl \
+      --nq-open /tmp/up/NQ-open.dev.jsonl --math500 /tmp/up/math500.test.jsonl
     python3 eval/tasks/validate.py
     git diff --stat eval/tasks   # empty when the sample is unchanged
 
@@ -88,28 +113,40 @@ log(tokens, A0). Same tasks in both arms, so the test is paired.
   prompting cut length by 48.70% [1]; compression methods cut 40-67%
   [7] [8]. A 10% STE tax is the smallest effect worth a claim.
 - Variance: sd of d = sd_task x sqrt(2(1 - rho)).
-  - sd_task = 0.57: measured, sd of log word count of the 1319 GSM8K
-    reference solutions. A proxy for how much length varies with the
-    problem. Model outputs can vary more.
+  - sd_task = 0.95: a conversion, not a measurement. Srivastava et al.
+    2025 (arXiv 2511.04108, Table 5) report reasoning tokens at batch
+    size 1 as 2,973 +- 190 (DeepSeek-R1) and 2,926 +- 210 (o1), 95% CI
+    over n = 1,300 instances. Inverting the CI gives an sd of about
+    3,500 and 3,860 tokens. Under a lognormal, the sd of log tokens is
+    about 0.93 and 1.00. The lognormal conversion is the reviewer's,
+    not the paper's (docs/lit-review-reasoning-cost.md). The set pools
+    13 datasets, so it overstates the spread inside one benchmark.
+  - The first value, 0.57, was the sd of log word count of the 1319
+    GSM8K reference solutions: text written by people, not model
+    output. It is the lower bound.
   - rho = 0.5: assumption, between-arm correlation of log length per
-    task. Same-task pairs usually correlate more; 0.5 is conservative.
-    No reviewed abstract reports a per-task variance.
-  - sd of d = 0.57.
+    task. No reviewed paper reports it.
+  - sd of d = 0.95.
 - alpha = 0.05 / 4 (Bonferroni: A1-A0 and A2-A0, two models), power
-  0.8, two-sided: n = 399. Run 400.
-- Sensitivity (eval/tasks/power.py): one contrast at alpha 0.05 needs
-  281; rho = 0.7 needs 240.
-- Accuracy (McNemar, n = 400, same alpha): power 0.70 for a 5-point
-  drop with 8% / 3% discordant pairs; 0.31 for a 3-point drop. Small
-  accuracy losses need the full 1319 GSM8K test split. The run cost is
-  low; extend with `random.Random(0)` order kept, or run the full file.
-- QA uses the same n. Its sd_task is not measured; QA answers are short,
-  so think-segment length dominates. Replace both assumptions with the
-  pilot values from the first cluster run: `python3 eval/tasks/power.py
-  --sd-task S --rho R`.
+  0.8, two-sided: n = 1108 (was 399 at sd_task 0.57). Decision: the
+  cost axis runs the full GSM8K test split, 1319 tasks.
+- Sensitivity (eval/tasks/power.py): sd_task 0.93 needs 1062, 1.00
+  needs 1228; one contrast at alpha 0.05 needs 780; rho = 0.7 needs
+  665. 1319 covers each.
+- Samples: each task runs k samples (default 3). The token outcome is
+  the per-task mean over samples, so within-task noise drops; the
+  between-task spread above does not.
+- Accuracy: MATH-500 sample, n = 200 (decision). McNemar at the same
+  alpha, one sample per task: power 0.36 for a 5-point drop with 8% /
+  3% discordant pairs, 0.14 for a 3-point drop. k samples raise it
+  only through less within-item noise. A 5-point claim at power 0.8
+  needs more items: the numeric pool holds 318.
+- QA uses the same rule. Its sd_task is not measured. Replace both
+  assumptions with the pilot values from the first cluster run:
+  `python3 eval/tasks/power.py --sd-task S --rho R`.
 - Writing (26): sized by the brief, not by power. The watermark z is
-  per sample; more power comes from more samples per prompt at
-  temperature 0.7, not more prompts.
+  per sample; more power comes from more samples per prompt, not more
+  prompts.
 
 ## Benchmark choice: what cost and verbosity studies use
 
@@ -136,15 +173,16 @@ only in a full text is missed.
 
 Consequences for this suite:
 
-- GSM8K is defensible as the primary reasoning set. A harder set
-  (MATH-500) is the expected second set. Not added: no MATH-500 file
-  was pinned in this pass; see Not done.
+- GSM8K is defensible as the primary cost set. MATH-500 is the
+  harder set and carries accuracy (added 2026-10-08, numeric answers
+  only).
 - Factual QA has no standard in this literature. NQ-open gives short,
   checkable answers under a permissive license. MMLU-style letter
   answers break the harness QA check (see Known limits).
-- Harness budget: `max_new_tokens` 1024 with thinking on is under the
-  2048 budget at which [4] still sees truncation loss on GSM8K. Count
-  truncated outputs per arm, or raise the budget.
+- Harness budget: the default is now 16384 new tokens with the
+  vendor's thinking-mode sampling (eval/README.md). 1024 with greedy
+  decoding stays as a plumbing setting: it is under the 2048 budget at
+  which [4] still sees truncation loss on GSM8K.
 
 References (read level: abstract):
 
@@ -200,23 +238,20 @@ classes.
 
 ## Known limits
 
-- Harness compliance (eval/harness.py `compliance`) drops single tokens
-  that equal a declared term. A multi-word term (`INNER TUBE`, `OIL
-  FILTER`) never equals one token, so its words count as unapproved.
-  Plurals (`TIRES`) also miss. This lowers compliance for writing tasks
-  under every arm. Owner: harness.
+- Fixed in the harness refactor: naive compliance now allows a
+  multi-word term whole and a term in its regular plural
+  (eval/compliance.py `term_phrases`).
 - GSM8K and NQ-open tasks declare no technical terms. Names of things
   (`ducks`, `muffins`) count as unapproved. Arm contrasts survive;
   absolute compliance on these sets does not.
 - NQ-open gold is one string; true aliases (`U.S.` for `United States`)
   score false. Same for all arms.
-- Harness QA check falls back to a substring of the gold in the whole
-  final text. A one-letter gold (MMLU `A`) would match almost any text.
-  Reason NQ-open was used, not MMLU.
+- With no answer line, the harness records `fallback_correct` (gold
+  found anywhere in the text) apart and never counts it as correct. A
+  one-letter gold (MMLU `A`) would match almost any text. Reason
+  NQ-open was used, not MMLU.
 
 ## Not done
 
-- MATH-500 subset: the reviewed studies pair GSM8K with it. Next step
-  under the same build.py discipline.
 - Pilot variance: replace sd_task and rho with measured values after
   the first cluster run.

@@ -6,5 +6,19 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = ["pymupdf==1.28.2"]
 
+[project.optional-dependencies]
+# Local real-model smoke on the hf backend. Never synced on the dev box.
+# The cluster's vllm comes from AMD's ROCm image, not from PyPI, so there
+# is no vllm extra: the PyPI wheel targets CUDA.
+hf = ["torch>=2.6", "transformers>=4.51", "accelerate>=1.6"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

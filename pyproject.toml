@@ -13,7 +13,10 @@ dependencies = ["pymupdf==1.28.2"]
 hf = ["torch>=2.6", "transformers>=4.51", "accelerate>=1.6"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "numpy>=2",
+    "pytest>=8",
+]
 
 [tool.uv]
 package = false

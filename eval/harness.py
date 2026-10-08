@@ -419,7 +419,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--backend", choices=["mock", "hf", "vllm"],
                     default="mock")
-    ap.add_argument("--model", default="Qwen/Qwen3-32B")
+    ap.add_argument("--model", default="Qwen/Qwen3.8-27B")
     ap.add_argument("--tasks", default=str(REPO / "eval" / "tasks.jsonl"))
     ap.add_argument("--arms", nargs="+", default=["A0", "A2", "A1"])
     ap.add_argument("--out", default=None)

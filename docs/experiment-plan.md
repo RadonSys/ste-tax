@@ -5,38 +5,60 @@ the base models and the run procedure. The harness is eval/harness.py.
 
 ## Models
 
-Primary pair, same family on purpose:
+Model currency is a validity requirement, not a preference: a result on
+superseded checkpoints invites the objection that current models behave
+differently. Picks below are the newest published weights in scope as of
+2026-10-08, verified against the vendors' Hugging Face listings.
 
-- **Qwen/Qwen3-32B.** 32.8B dense. BF16 weights about 65.6 GB.
-- **Qwen/Qwen3-14B.** 14.8B dense. BF16 weights about 29.6 GB.
+Primary pair, same lineage on purpose:
+
+- **Qwen/Qwen3.8-27B** (Aug 2026). Current Qwen generation. 27B-class
+  dense model on the Qwen3.5 architecture (hybrid linear and full
+  attention), published as a vision-language checkpoint; the harness
+  serves it text-only. Checkpoint: 55.6 GB BF16 including the vision
+  tower. Apache-2.0.
+- **Qwen/Qwen3.5-9B** (Feb 2026). Same architecture family, same
+  248,320-token vocabulary. The 3.8 line publishes no text model under
+  27B, so the smaller rung comes from the 3.5 line. Checkpoint: 19.3 GB
+  BF16. Apache-2.0.
 
 Why this pair:
 
 - The scaling question (does the tax grow or shrink with model size?)
-  needs one tokenizer, one chat template, one thinking switch at both
-  sizes. Qwen3 gives that. Token counts, the primary cost axis, stay
-  comparable across the pair.
-- Both have hybrid thinking: a separable <think> segment that the harness
-  counts directly from token ids. Thinking on/off is a template switch,
-  so a thinking-off control costs no extra model.
-- Dense Qwen3 is the most exercised architecture on the ROCm/AITER
-  stack. vLLM lists gfx950 (MI350) as supported; AITER lists vLLM
-  integration on gfx950 as production.
+  needs one tokenizer and one thinking switch at both sizes. This pair
+  gives that at a roughly 3x size ratio, current generation at the
+  frontier rung.
+- Thinking is on by default and separable: a <think> segment precedes
+  the final response, the harness counts it from token ids, and
+  `enable_thinking` switches it per request, so a thinking-off control
+  costs no extra model. Qwen3.8 also exposes `reasoning_effort`.
+- vLLM lists the architecture (Qwen3_5ForConditionalGeneration) as
+  supported, and the Qwen3.8-27B card links an official vLLM recipe.
+  The architecture predates the pinned ROCm vLLM build; no new arch
+  support is needed for the 3.8 checkpoint itself.
 
-Rejected for the primary pair:
+Cross-family option, not in the primary pair:
 
-- **GLM-4.7-Flash** (30B total, 3B active MoE) posts the highest vendor
-  card scores in scope (AIME 25 = 91.6). Three problems. No sub-30B GLM
-  sibling exists, so the size pair would be cross-family and token
-  counts stop being comparable. Its card states vLLM support was
-  main-branch-only at release, and no MI350X validation was found; MoE
-  paths on gfx950 are the least settled part of the stack. Card scores
-  are vendor claims. Status: optional third model for family
+- **GLM-4.7-Flash** (Jan 2026; 30B total, 3B active MoE) is the newest
+  GLM that fits the scope. The GLM-5 line (Feb-Aug 2026) publishes
+  nothing small: GLM-5.3-Flash's checkpoint is 328 GB, the 5.3 flagship
+  756 GB. GLM-4.7-Flash posts the highest vendor card scores of any
+  in-scope GLM (AIME 25 = 91.6; card claims). Its costs: MoE paths on
+  gfx950 are the least settled part of the stack, its card warned
+  vLLM support was main-branch-only at release, and no MI350X
+  validation was found. Status: optional third model for family
   robustness, gated on a gfx950 smoke test under the pinned vLLM.
-- **DeepSeek.** The only in-scope checkpoint is
-  DeepSeek-R1-Distill-Qwen-32B (Jan 2025, Qwen2.5 base): always-on
-  chain-of-thought with no thinking-off arm, and a different tokenizer
-  from the Qwen3 pair. The V4 line is 284B and up, out of scope.
+
+Excluded:
+
+- **DeepSeek.** No current in-scope weights exist. The V4 line
+  (Apr-Sep 2026) starts at 284B total. The only sub-40B DeepSeek
+  reasoning checkpoints are the Jan 2025 R1 distills on a Qwen2.5
+  base; using them would create the outdated-model objection this
+  selection exists to remove.
+- **Qwen3 (Apr 2025) and older Qwen lines.** Superseded by 3.5/3.6/3.8.
+  An earlier draft of this plan pinned Qwen3-32B and Qwen3-14B; the
+  sweep to current generations replaced them.
 
 ## Hardware fit (DCS AMD donation)
 
@@ -44,13 +66,12 @@ Full hardware analysis, run procedure, and pre-flight checks:
 docs/dcs-amd-hardware.md. Summary:
 
 - MI350X: 288 GB HBM3E per GPU, 8 per node, gfx950, ROCm 7 with
-  vLLM 0.23. Qwen3-32B in BF16 uses about 66 GB: one GPU, large KV
-  headroom. No tensor parallelism, no quantization; BF16 only, so
-  quantization is not a confound.
-- MI100 node: 32 GB per GPU. Qwen3-14B in BF16 (about 30 GB) fits one
-  GPU with small KV headroom, or the 32B fits across the node at TP=8.
-  Use the MI100 node for bring-up and the small model; MI350X for the
-  main runs.
+  vLLM 0.23. The Qwen3.8-27B checkpoint is 55.6 GB in BF16: one GPU,
+  large KV headroom. No tensor parallelism, no quantization; BF16
+  only, so quantization is not a confound.
+- MI100 node: 32 GB per GPU. Qwen3.5-9B in BF16 (19.3 GB) fits one
+  GPU with about 11 GB to spare for KV. Use the MI100 node for
+  bring-up and the small model; MI350X for the main runs.
 - Access status: allocation not yet in hand. Path is PI sponsorship
   (faculty ask) plus account provisioning via the AMD lab manager.
   Everything below runs the day access lands.
@@ -79,18 +100,19 @@ Local plumbing test (no model):
 
     python3 eval/harness.py --backend mock
 
-Local real-model smoke (CPU works, slow):
+Local real-model smoke (CPU works, slow; fixture only, not an
+experiment model):
 
     uv run --with transformers --with torch --with accelerate \
       python eval/harness.py --backend hf \
-      --model Qwen/Qwen3-0.6B --limit 2 --max-new-tokens 192
+      --model Qwen/Qwen3.5-0.8B --limit 2 --max-new-tokens 192
 
 Cluster (inside the ROCm/vLLM environment on a DCS node):
 
     git clone --recurse-submodules https://github.com/RadonSys/ste-tax.git
     cd ste-tax
-    python eval/harness.py --backend vllm --model Qwen/Qwen3-32B
-    python eval/harness.py --backend vllm --model Qwen/Qwen3-14B
+    python eval/harness.py --backend vllm --model Qwen/Qwen3.8-27B
+    python eval/harness.py --backend vllm --model Qwen/Qwen3.5-9B
 
 Results land in eval/results/*.jsonl, one record per task and arm.
 

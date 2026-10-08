@@ -104,28 +104,35 @@ Rough edges, all [ext] reported:
 The eval (docs/experiment-plan.md, eval/harness.py) is single-model,
 batch-1, sequential inference with per-task latency. Models and weights:
 
-| Model | BF16 weights | FP8 weights | Placement |
+| Model | BF16 checkpoint | FP8 checkpoint | Placement |
 | --- | --- | --- | --- |
-| Qwen3-32B (32.8B dense) | about 65.6 GB | about 32.8 GB | 1x MI350X |
-| Qwen3-14B (14.8B dense) | about 29.6 GB | about 14.8 GB | 1x MI350X, or MI100 with care |
+| Qwen3.8-27B (27B dense, incl. vision tower) | 55.6 GB | about 28 GB | 1x MI350X |
+| Qwen3.5-9B (9B dense, incl. vision tower) | 19.3 GB | n/a | 1x MI350X, or 1x MI100 |
 | GLM-4.7-Flash (30B MoE, optional) | about 62 GB | about 31 GB | 1x MI350X, smoke-test first |
 
-KV cache math (BF16, per token = layers x KV heads x head dim x 2 for
-K and V x 2 bytes):
+Both Qwen picks are the vendors' current generations (3.8: Aug 2026;
+3.5: Feb 2026) and share one tokenizer. GLM-4.7-Flash (Jan 2026) is the
+newest GLM in scope: the GLM-5 line publishes nothing under a 328 GB
+checkpoint. Model rationale: docs/experiment-plan.md.
 
-- Qwen3-32B: 64 layers, 8 KV heads, head dim 128: 256 KB per token.
-  On one MI350X with vLLM at 0.90 GPU memory utilization, the budget
-  is about 259 GB; after 66 GB of weights and a few GB of runtime,
-  roughly 185 GB remains for KV, on the order of 700k tokens. The
-  harness cap of 16,384 context tokens is the binding limit, never
-  memory. Conclusion: run the 32B on one GPU, BF16, tensor parallelism
-  1. No quantization, so precision is not a confound.
-- Qwen3-14B: 40 layers, 8 KV heads, head dim 128: 160 KB per token.
-  On MI350X it is trivially small. On one MI100 GPU (32 GB): BF16
-  weights leave about 2 GB, roughly 9k KV tokens, enough only for
-  short contexts; FP8 weights (about 14.8 GB) leave about 15 GB,
-  roughly 90k tokens. MI100 plan: 14B in FP8 for bring-up and
-  functional runs, all reported numbers from MI350X in BF16.
+KV cache math (BF16, per token = full-attention layers x KV heads x
+head dim x 2 for K and V x 2 bytes). Both Qwen models use hybrid
+attention: only every 4th layer is full attention and caches KV; the
+linear-attention layers carry a fixed-size state instead.
+
+- Qwen3.8-27B: 64 layers, 16 of them full attention, 4 KV heads, head
+  dim 256: 64 KB per token. On one MI350X with vLLM at 0.90 GPU memory
+  utilization, the budget is about 259 GB; after 55.6 GB of weights
+  and runtime, roughly 195 GB remains, on the order of 3M KV tokens.
+  The native context (262,144) and the harness cap of 16,384 tokens
+  bind long before memory does. Conclusion: one GPU, BF16, tensor
+  parallelism 1. No quantization, so precision is not a confound.
+- Qwen3.5-9B: 32 layers, 8 of them full attention, 4 KV heads, head
+  dim 256: 32 KB per token. On MI350X it is trivially small. On one
+  MI100 GPU (32 GB), BF16 weights (19.3 GB) leave about 11 GB, roughly
+  340k KV tokens: comfortable in BF16, no FP8 needed. MI100 plan: 9B
+  for bring-up and functional runs; all reported numbers from MI350X
+  in BF16.
 
 Design consequences:
 
@@ -146,11 +153,11 @@ Design consequences:
   or disable it (`--no-enable-prefix-caching` in server terms; the
   offline LLM takes `enable_prefix_caching=False`) for the
   cold-prompt number. Preliminary runs: disable it.
-- Reasoning tokens: Qwen3 emits a <think> segment; vLLM offline
+- Reasoning tokens: Qwen3.5/3.8 emit a <think> segment; vLLM offline
   returns raw token ids and the harness counts the span itself, so no
-  server-side reasoning parser is required. (vLLM parser names, if a
-  server is used instead: `qwen3` or `deepseek_r1` for Qwen3,
-  `glm45` for GLM.)
+  server-side reasoning parser is required. (If a server is used
+  instead, the Qwen3.8-27B card's vLLM recipe names the serve flags;
+  the GLM parser is `glm45`.)
 - Determinism: temperature 0 and fixed seed in the harness config.
   vLLM greedy decoding is deterministic per prompt on one GPU, up to
   kernel nondeterminism in reductions; treat small run-to-run latency
@@ -173,8 +180,8 @@ Do not design for live downloads. Either confirm egress on site, or
 stage the model directories on a connected machine and copy them to
 cluster storage:
 
-    huggingface-cli download Qwen/Qwen3-32B
-    huggingface-cli download Qwen/Qwen3-14B
+    huggingface-cli download Qwen/Qwen3.8-27B
+    huggingface-cli download Qwen/Qwen3.5-9B
     export HF_HOME=<cluster storage>/hf   # or pass local paths to --model
 
 The harness accepts a local directory as --model for both backends.
@@ -183,7 +190,7 @@ Step 2, smoke (5 minutes, proves the stack end to end):
 
     git clone --recurse-submodules https://github.com/RadonSys/ste-tax.git
     cd ste-tax
-    python3 eval/harness.py --backend vllm --model Qwen/Qwen3-14B --limit 3
+    python3 eval/harness.py --backend vllm --model Qwen/Qwen3.5-9B --limit 3
 
 Expect three tasks across three arms, a summary block, and a results
 file under eval/results/. If this fails, the failure is environmental
@@ -192,8 +199,8 @@ mock and hf backends elsewhere.
 
 Step 3, full preliminary runs:
 
-    python3 eval/harness.py --backend vllm --model Qwen/Qwen3-32B
-    python3 eval/harness.py --backend vllm --model Qwen/Qwen3-14B
+    python3 eval/harness.py --backend vllm --model Qwen/Qwen3.8-27B
+    python3 eval/harness.py --backend vllm --model Qwen/Qwen3.5-9B
 
 One process per GPU. For parallel arms across the two MI350X nodes,
 split by model (cleaner than splitting arms: one model's arms share a

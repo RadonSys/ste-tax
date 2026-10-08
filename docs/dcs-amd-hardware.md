@@ -165,6 +165,8 @@ Design consequences:
 
 ## 6. Run procedure on a DCS node
 
+Entry point is now `python3 -m eval run`, from the repo root. Current commands: eval/README.md.
+
 Step 0, pre-flight (record all output with the results):
 
     rocminfo | grep -A2 gfx        # expect gfx950 on MI350X nodes

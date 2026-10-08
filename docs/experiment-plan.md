@@ -96,6 +96,8 @@ docs/dcs-amd-hardware.md. Summary:
 
 ## Run commands
 
+Entry point is now `python -m eval run`, from the repo root. Current commands: eval/README.md.
+
 Local plumbing test (no model):
 
     python3 eval/harness.py --backend mock

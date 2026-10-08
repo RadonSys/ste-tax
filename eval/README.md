@@ -76,11 +76,12 @@ checkout, environment (python, platform, host, torch / vllm /
 transformers / accelerate versions, `rocminfo` and `rocm-smi` output or
 null), start and finish times, and `rescored` after a rescore.
 
-`records.jsonl`, one record per task and arm:
+`records.jsonl`, one record per task, sample, and arm:
 
 | Field | Meaning |
 | --- | --- |
 | `task_id`, `kind`, `arm`, `model`, `backend` | identity |
+| `sample` | sample index 0..k-1; sample s runs every call with seed + s. Absent in old records: read as 0 |
 | `correct` | answer-line verdict. No answer line is false. Null for writing |
 | `fallback_correct` | set only with no answer line: gold found in the text. Never counted as correct |
 | `degenerate` | under 2 word tokens, or a refusal opening |
@@ -99,10 +100,14 @@ Token counts come from token ids when the backend has a tokenizer, else
 from whitespace words (mock). A think segment opened by the chat
 template (output holds only `</think>`) counts as reasoning.
 
-Summary per arm: accuracy over scored records that are not truncated,
-answer-line misses and fallback hits, mean tokens and latency, naive
-compliance, checker `ok` rate and mean findings, degenerate and
-truncated counts. Then each arm's tax against A0.
+Summary per arm: `k` samples, then each mean metric as mean±sd. The
+metric is computed per sample index over the tasks, then averaged over
+the k samples (avg@k); sd is the spread of the k per-sample values (0
+for k = 1). Mean metrics: accuracy over scored records that are not
+truncated, tokens, latency, naive compliance, checker `ok` rate, mean
+findings. Counts (records, answer-line misses, fallback hits,
+degenerate, truncated, checked) are sums over all samples. Then each
+arm's tax against A0, on the means.
 
 ## Compliance
 
@@ -131,11 +136,13 @@ the first time. A failed call records `skipped` with the error.
 | Flag | Default | Source |
 | --- | --- | --- |
 | `--arms` | `A0 A2 A1` | intervention pin order |
-| `--temperature`, `--seed` | `0`, `0` | experiment plan |
-| `--max-new-tokens` | `1024` | experiment plan. Thinking models can need more. See `truncated` |
+| `--decoding` | `thinking`: temperature 1.0, top-p 0.95, top-k 20, 16384 new tokens, 3 samples | Qwen3.8-27B card, Best Practices, thinking mode; docs/advisor-review.md |
+| `--decoding greedy` | temperature 0, top-p 1.0, top-k off, 1024 new tokens, 1 sample | plumbing setting. Never a reported number: the cap truncates thinking output |
+| `--temperature`, `--top-p`, `--top-k`, `--max-new-tokens`, `--samples` | from the preset; a flag overrides one field | this file |
+| `--seed` | `0`; sample s uses seed + s | experiment plan |
 | `--wordlist` | `ids`: the 879 approved `WORD (POS)` ids in the A1/A2 system prompt. `none`: the rule only | experiment plan, known limits |
 | `--prefix-caching` | off: every call pays its full prefill (cold-prompt cost) | hardware doc, section 5 |
 | `--no-thinking` | thinking on | experiment plan |
 | `--tp` | `1` | hardware doc |
-| vLLM `max_model_len`, `gpu_memory_utilization` | `16384`, `0.90` (fixed, in manifest) | hardware doc |
+| vLLM `max_model_len`, `gpu_memory_utilization` | `32768`, `0.90` (fixed, in manifest): prompt plus 16384 new tokens | hardware doc, KV cache |
 | `--checker` | `cli` | this file |

@@ -259,11 +259,21 @@ def test_answer_label_allowed_for_scored_kinds_only():
 # ---------------------------------------------------------------- summary
 
 
-def record(arm, correct, compliance, checker, gen=10, fallback=None, truncated=False):
+def record(
+    arm,
+    correct,
+    compliance,
+    checker,
+    gen=10,
+    fallback=None,
+    truncated=False,
+    sample=0,
+):
     return ArmRecord(
         "t",
         Kind.WRITING if correct is None else Kind.MATH,
         arm,
+        sample,
         "m",
         "mock",
         correct,
@@ -317,6 +327,31 @@ def test_fallback_hits_counted_not_correct():
     ]
     line = summarize(rs).splitlines()[0]
     assert "acc=0.500" in line and "no_answer_line=1 (fallback hits 1)" in line
+
+
+def test_summary_mean_and_spread_over_samples():
+    """Accuracy per sample: 1.0, 0.0, 0.5 -> mean 0.5, sd 0.5. Counts sum."""
+    off = Skipped("off")
+    rs = [
+        record(Arm.A0, True, 1.0, off, sample=0),
+        record(Arm.A0, False, 1.0, off, sample=1),
+        record(Arm.A0, True, 1.0, off, sample=2, truncated=True),
+        record(Arm.A0, False, 1.0, off, sample=2),
+        record(Arm.A0, True, 1.0, off, sample=2),
+    ]
+    line = summarize(rs).splitlines()[0]
+    assert line.startswith("A0: k=3 n=5 acc=0.500±0.500")
+    assert "truncated=1" in line and "gen_tok=10.0±0.0" in line
+
+
+def test_one_sample_spread_is_zero():
+    line = summarize([record(Arm.A0, True, 1.0, Skipped("off"))]).splitlines()[0]
+    assert "k=1" in line and "acc=1.000±0.000" in line
+
+
+def test_run_arm_keeps_sample_index():
+    gen, _ = scripted("Answer: 200")
+    assert run_arm(gen, task(), Arm.A0, ctx(), sample=2).sample == 2
 
 
 def test_summary_tax_against_a0():

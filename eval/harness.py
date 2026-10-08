@@ -11,7 +11,7 @@ Arms (default run order A0, A2, A1, per the pin):
   the draft's own correctness, so a rewrite that fixes or breaks the
   answer shows.
 
-Per task and arm: correct (final text, after the think segment),
+Per task, arm, and sample (k samples, seed + sample index): correct (final text, after the think segment),
 reasoning_tokens, generated_tokens, output_tokens, latency_s,
 compliance (naive rate), checker outcome, degenerate, truncated.
 """
@@ -265,10 +265,13 @@ class Context:
     naive: Callable[[str, tuple[str, ...]], tuple[float | None, tuple[str, ...]]]
 
 
-def run_arm(generate: Generate, task: Task, arm: Arm, ctx: Context) -> ArmRecord:
-    """One record for (task, arm). Effects only through `generate`; A2
-    sequences two calls, the rewrite reads the draft. The checker runs
-    later over the whole run, so `checker` starts as Skipped("pending")."""
+def run_arm(
+    generate: Generate, task: Task, arm: Arm, ctx: Context, sample: int = 0
+) -> ArmRecord:
+    """One record for (task, arm, sample). Effects only through
+    `generate`, which the shell seeds per sample; A2 sequences two
+    calls, the rewrite reads the draft. The checker runs later over the
+    whole run, so `checker` starts as Skipped("pending")."""
     tok = ctx.tokenizer
     rewrite = None
     match arm:
@@ -283,8 +286,9 @@ def run_arm(generate: Generate, task: Task, arm: Arm, ctx: Context) -> ArmRecord
             reasoning, generated = m.reasoning_tokens, m.generated_tokens
             latency, truncated = gen.latency_s, gen.truncated
         case Arm.A2:
-            # ponytail: A2 regenerates the A0 draft. At temperature 0 it
-            # equals the A0 arm; reuse that output if GPU time binds.
+            # ponytail: A2 regenerates the A0 draft. With one seed per
+            # sample (vLLM per-request seed) it equals the A0 arm's
+            # sample; reuse that output if GPU time binds.
             draft = generate(plain(task.prompt))
             d = measure(draft, tok)
             gen = generate(
@@ -310,6 +314,7 @@ def run_arm(generate: Generate, task: Task, arm: Arm, ctx: Context) -> ArmRecord
         task_id=task.id,
         kind=task.kind,
         arm=arm,
+        sample=sample,
         model=ctx.model,
         backend=ctx.backend,
         correct=score.correct,
@@ -339,6 +344,8 @@ def mean(xs: Iterable[float]) -> float:
 
 @dataclass(frozen=True, slots=True)
 class ArmStats:
+    """Means of one arm over one set of records (one sample index)."""
+
     n: int
     accuracy: float
     no_line: int
@@ -376,36 +383,98 @@ def arm_stats(rs: Sequence[ArmRecord]) -> ArmStats:
     )
 
 
+# Mean metrics: averaged over samples (avg@k), with the sd across the k
+# per-sample means as the spread. Count fields are summed.
+MEANS = (
+    "accuracy",
+    "generated",
+    "reasoning",
+    "latency",
+    "compliance",
+    "checker_ok",
+    "findings",
+)
+COUNTS = ("n", "no_line", "fallback_hits", "degenerate", "truncated", "checked")
+
+
+@dataclass(frozen=True, slots=True)
+class Spread:
+    mean: float
+    sd: float  # sd across the k per-sample means; 0.0 when k = 1
+
+    def show(self, fmt: str) -> str:
+        return f"{self.mean:{fmt}}±{self.sd:{fmt}}"
+
+
+@dataclass(frozen=True, slots=True)
+class ArmSummary:
+    k: int
+    counts: dict[str, int]
+    means: dict[str, Spread]
+
+
+def finite(xs: Iterable[float]) -> list[float]:
+    return [x for x in xs if not math.isnan(x)]
+
+
+def arm_summary(rs: Sequence[ArmRecord]) -> ArmSummary:
+    """One arm over all samples: per-sample ArmStats, then the mean and
+    sd of each mean metric over samples. A sample whose metric is NaN
+    (nothing to average) leaves that metric's mean and sd."""
+    per = [
+        arm_stats([r for r in rs if r.sample == i])
+        for i in sorted({r.sample for r in rs})
+    ]
+    means = {}
+    for f in MEANS:
+        xs = finite(getattr(s, f) for s in per)
+        sd = statistics.stdev(xs) if len(xs) > 1 else (0.0 if xs else math.nan)
+        means[f] = Spread(mean(xs), sd)
+    counts = {f: sum(getattr(s, f) for s in per) for f in COUNTS}
+    return ArmSummary(len(per), counts, means)
+
+
 def ratio(a: float, b: float) -> float:
     return a / b if b else math.nan
 
 
 def summarize(records: Sequence[ArmRecord]) -> str:
-    """Per-arm means, then the tax of each arm against A0."""
+    """Per arm: mean±sd over the k samples of each mean metric, summed
+    counts. Then the tax of each arm against A0, on the means."""
     stats = {
-        arm: arm_stats([r for r in records if r.arm is arm])
+        arm: arm_summary([r for r in records if r.arm is arm])
         for arm in sorted({r.arm for r in records})
     }
-    lines = [
-        f"{arm}: n={s.n} acc={s.accuracy:.3f} "
-        f"no_answer_line={s.no_line} (fallback hits {s.fallback_hits}) "
-        f"gen_tok={s.generated:.1f} reason_tok={s.reasoning:.1f} "
-        f"latency={s.latency:.2f}s compliance={s.compliance:.3f} "
-        f"checker_ok={s.checker_ok:.3f} findings={s.findings:.2f} "
-        f"(checked {s.checked}/{s.n}) "
-        f"degenerate={s.degenerate} truncated={s.truncated}"
-        for arm, s in stats.items()
-    ]
+
+    def line(arm: Arm, s: ArmSummary) -> str:
+        m, c = s.means, s.counts
+        return (
+            f"{arm}: k={s.k} n={c['n']} acc={m['accuracy'].show('.3f')} "
+            f"no_answer_line={c['no_line']} "
+            f"(fallback hits {c['fallback_hits']}) "
+            f"gen_tok={m['generated'].show('.1f')} "
+            f"reason_tok={m['reasoning'].show('.1f')} "
+            f"latency={m['latency'].show('.2f')}s "
+            f"compliance={m['compliance'].show('.3f')} "
+            f"checker_ok={m['checker_ok'].show('.3f')} "
+            f"findings={m['findings'].show('.2f')} "
+            f"(checked {c['checked']}/{c['n']}) "
+            f"degenerate={c['degenerate']} truncated={c['truncated']}"
+        )
+
+    lines = [line(arm, s) for arm, s in stats.items()]
     if Arm.A0 in stats:
-        base = stats[Arm.A0]
-        lines += [
-            f"tax {arm}-A0: acc {s.accuracy - base.accuracy:+.3f}, "
-            f"gen_tok x{ratio(s.generated, base.generated):.2f}, "
-            f"reason_tok {s.reasoning - base.reasoning:+.1f}, "
-            f"latency x{ratio(s.latency, base.latency):.2f}, "
-            f"compliance {s.compliance - base.compliance:+.3f}, "
-            f"checker_ok {s.checker_ok - base.checker_ok:+.3f}"
-            for arm, s in stats.items()
-            if arm is not Arm.A0
-        ]
+        b = {f: v.mean for f, v in stats[Arm.A0].means.items()}
+        for arm, s in stats.items():
+            if arm is Arm.A0:
+                continue
+            x = {f: v.mean for f, v in s.means.items()}
+            lines.append(
+                f"tax {arm}-A0: acc {x['accuracy'] - b['accuracy']:+.3f}, "
+                f"gen_tok x{ratio(x['generated'], b['generated']):.2f}, "
+                f"reason_tok {x['reasoning'] - b['reasoning']:+.1f}, "
+                f"latency x{ratio(x['latency'], b['latency']):.2f}, "
+                f"compliance {x['compliance'] - b['compliance']:+.3f}, "
+                f"checker_ok {x['checker_ok'] - b['checker_ok']:+.3f}"
+            )
     return "\n".join(lines)

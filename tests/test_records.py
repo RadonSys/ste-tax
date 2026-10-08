@@ -138,11 +138,12 @@ CHECKED = Checked(
 REWRITE = Rewrite("draft", True, 10, 4, 8, 2)
 
 
-def arm_record(arm=Arm.A0, checker=CHECKED, rewrite=None):
+def arm_record(arm=Arm.A0, checker=CHECKED, rewrite=None, sample=0):
     return ArmRecord(
         "t",
         Kind.MATH,
         arm,
+        sample,
         "m",
         "mock",
         True,
@@ -167,6 +168,7 @@ def arm_record(arm=Arm.A0, checker=CHECKED, rewrite=None):
         arm_record(),
         arm_record(checker=Skipped("off")),
         arm_record(Arm.A2, rewrite=REWRITE),
+        arm_record(sample=2),
         replace(arm_record(), compliance=None, correct=False, fallback_correct=True),
         replace(arm_record(), kind=Kind.WRITING, correct=None),
     ],
@@ -193,6 +195,18 @@ def test_rewrite_iff_a2(arm, rewrite):
 def test_score_invariants(change):
     with pytest.raises(SchemaError):
         replace(arm_record(), **change)
+
+
+def test_record_without_sample_reads_as_sample_0():
+    """Records written before k samples carry no index."""
+    raw = arm_record(sample=0).to_json()
+    del raw["sample"]
+    assert ArmRecord.from_json(raw) == arm_record(sample=0)
+
+
+def test_negative_sample_rejected():
+    with pytest.raises(SchemaError, match="sample"):
+        arm_record(sample=-1)
 
 
 def test_unknown_checker_status_rejected():

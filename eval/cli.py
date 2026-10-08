@@ -23,6 +23,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
+from functools import partial
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,39 @@ REPO = Path(__file__).resolve().parent.parent
 RESULTS = REPO / "eval" / "results"
 SKILLS = REPO / ".github" / "skills"
 WATERMARK_TEMPERATURE = 0.7
+
+# Decoding presets. thinking: the Qwen3.8-27B card, "Best Practices",
+# thinking mode (temperature 1.0, top_p 0.95, top_k 20), a 16384-token
+# budget, k = 3 samples per task. greedy: the plumbing setting of the
+# first runs, never a reported number. An explicit flag overrides one
+# field of the preset.
+DECODING = {
+    "thinking": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_new_tokens": 16384,
+        "samples": 3,
+    },
+    "greedy": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 0,
+        "max_new_tokens": 1024,
+        "samples": 1,
+    },
+}
+
+
+def resolve_decoding(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill each decoding flag left unset from the --decoding preset."""
+    preset = DECODING[args.decoding]
+    return argparse.Namespace(
+        **{
+            **vars(args),
+            **{k: v for k, v in preset.items() if getattr(args, k) is None},
+        }
+    )
 
 
 # ------------------------------------------------------------------ files
@@ -190,6 +224,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         Sampling,
     )
 
+    args = resolve_decoding(args)
     paths = task_paths(args)
     tasks = loader.sample(loader.load(paths), args.limit, args.sample_seed)
     check = make_checker(args)  # fail fast, before the model loads
@@ -236,7 +271,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     }
     write_json(out / "manifest.json", manifest)
 
-    sampling = Sampling(args.max_new_tokens, args.temperature, args.seed)
+    sampling = Sampling(
+        args.max_new_tokens, args.temperature, args.seed, args.top_p, args.top_k
+    )
     backend = backend_for(args, sampling)
 
     if args.watermark:
@@ -261,8 +298,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def run_arms(backend, tasks, wordlist, args, path: Path) -> list[ArmRecord]:
-    """Task-major, arms in the given order. Streams each record to
-    `path` as it lands, so a crash keeps the finished part."""
+    """Task-major, then sample, then arms in the given order. Sample s
+    runs every call with seed + s. Streams each record to `path` as it
+    lands, so a crash keeps the finished part."""
     trie = default_trie()
     ctx = Context(
         model=args.model,
@@ -274,18 +312,20 @@ def run_arms(backend, tasks, wordlist, args, path: Path) -> list[ArmRecord]:
     records = []
     with open(path, "w", encoding="utf-8") as f:
         for task in tasks:
-            for arm in map(Arm, args.arms):
-                rec = run_arm(backend.generate, task, arm, ctx)
-                records.append(rec)
-                f.write(json.dumps(rec.to_json(), ensure_ascii=False) + "\n")
-                f.flush()
-                print(
-                    f"{task.id} {arm}: correct={rec.correct} "
-                    f"gen={rec.generated_tokens} "
-                    f"reason={rec.reasoning_tokens} "
-                    f"compliance={rec.compliance}",
-                    flush=True,
-                )
+            for k in range(args.samples):
+                generate = partial(backend.generate, seed=args.seed + k)
+                for arm in map(Arm, args.arms):
+                    rec = run_arm(generate, task, arm, ctx, sample=k)
+                    records.append(rec)
+                    f.write(json.dumps(rec.to_json(), ensure_ascii=False) + "\n")
+                    f.flush()
+                    print(
+                        f"{task.id} {arm} #{k}: correct={rec.correct} "
+                        f"gen={rec.generated_tokens} "
+                        f"reason={rec.reasoning_tokens} "
+                        f"compliance={rec.compliance}",
+                        flush=True,
+                    )
     return records
 
 
@@ -426,8 +466,24 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--arms", nargs="+", choices=[a.value for a in Arm], default=["A0", "A2", "A1"]
     )
-    run.add_argument("--max-new-tokens", type=positive, default=1024)
-    run.add_argument("--temperature", type=float, default=0.0)
+    run.add_argument(
+        "--decoding",
+        choices=list(DECODING),
+        default="thinking",
+        help="preset. thinking (default): temperature 1.0, top-p 0.95, "
+        "top-k 20, 16384 new tokens, 3 samples (Qwen3.8 card). greedy: "
+        "temperature 0, 1024 new tokens, 1 sample; plumbing only",
+    )
+    run.add_argument("--max-new-tokens", type=positive, default=None)
+    run.add_argument("--temperature", type=float, default=None)
+    run.add_argument("--top-p", type=float, default=None)
+    run.add_argument("--top-k", type=int, default=None, help="0 = off")
+    run.add_argument(
+        "--samples",
+        type=positive,
+        default=None,
+        help="k samples per task and arm; sample s uses seed + s",
+    )
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--tp", type=positive, default=1)
     run.add_argument("--no-thinking", dest="thinking", action="store_false")

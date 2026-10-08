@@ -205,13 +205,15 @@ class Rewrite:
 
 @dataclass(frozen=True, slots=True)
 class ArmRecord:
-    """One task under one arm. Invariants: `rewrite` is set iff arm A2;
+    """One sample of one task under one arm. `sample` is the index in
+    0..k-1 (seed + sample). Invariants: `rewrite` is set iff arm A2;
     `correct` None iff kind writing; `fallback_correct` set only when no
-    answer line exists, so then `correct` is False."""
+    answer line exists, so then `correct` is False; `sample` >= 0."""
 
     task_id: str
     kind: Kind
     arm: Arm
+    sample: int
     model: str
     backend: str
     correct: bool | None
@@ -229,7 +231,9 @@ class ArmRecord:
     rewrite: Rewrite | None
 
     def __post_init__(self) -> None:
-        where = f"{self.task_id} {self.arm}"
+        where = f"{self.task_id} {self.arm} #{self.sample}"
+        if self.sample < 0:
+            raise SchemaError(f"{where}: sample must be >= 0")
         if (self.arm is Arm.A2) != (self.rewrite is not None):
             raise SchemaError(f"{where}: rewrite iff A2")
         if (self.kind is Kind.WRITING) != (self.correct is None):
@@ -245,6 +249,8 @@ class ArmRecord:
         fields = dict(raw)
         fields["kind"] = Kind(raw["kind"])
         fields["arm"] = Arm(raw["arm"])
+        # Records written before k samples have no index: one sample, 0.
+        fields["sample"] = int(raw.get("sample", 0))
         fields["nonconforming"] = tuple(raw["nonconforming"])
         fields["checker"] = parse_checker(raw["checker"])
         rewrite = raw.get("rewrite")

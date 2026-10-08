@@ -87,11 +87,16 @@ def approved_id_list(lexicon):
 # ------------------------------------------------------------- compliance
 
 def compliance(text, trie, technical_terms):
+    """Rate in [0, 1], or None when the text has no scorable tokens.
+
+    Empty output must not read as perfectly compliant; degeneracy is a
+    separate flag and the compliance mean skips None.
+    """
     toks = [t for t in ste_validate.tokenize(text) if not t.isdigit()]
     allowed = {t.upper() for t in technical_terms}
     toks = [t for t in toks if t not in allowed]
     if not toks:
-        return 1.0, []
+        return None, []
     conforming, nonconforming = ste_validate.validate(" ".join(toks), trie)
     good = sum(len(p.split()) for p in conforming)
     total = good + len(nonconforming)
@@ -328,7 +333,7 @@ def run_arm(backend, task, arm, lexicon, trie, cfg):
         "output_tokens": (len(tok.encode(final)) if tok is not None
                           else len(final.split())),
         "latency_s": round(res["latency_s"], 3),
-        "compliance": round(rate, 4),
+        "compliance": (round(rate, 4) if rate is not None else None),
         "nonconforming": nonconf[:50],
         "text": final,
     }
@@ -385,11 +390,13 @@ def summarize(records):
         acc = (sum(r["correct"] for r in scored) / len(scored)
                if scored else float("nan"))
         mean = lambda k: sum(r[k] for r in rs) / len(rs)  # noqa: E731
+        comp = [r["compliance"] for r in rs if r["compliance"] is not None]
         stats[arm] = {"n": len(rs), "accuracy": acc,
                       "generated": mean("generated_tokens"),
                       "reasoning": mean("reasoning_tokens"),
                       "latency": mean("latency_s"),
-                      "compliance": mean("compliance"),
+                      "compliance": (sum(comp) / len(comp) if comp
+                                     else float("nan")),
                       "degenerate": sum(r["degenerate"] for r in rs)}
         s = stats[arm]
         lines.append(

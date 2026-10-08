@@ -1,53 +1,51 @@
-#!/usr/bin/env python3
-"""STE-tax eval harness: arms A0/A1/A2 on checkable tasks.
+"""STE-tax eval: pure core. Arms, answer check, degeneracy, reasoning
+split, metrics, summary. No I/O here; the shell is eval/cli.py.
 
 Design: docs/design.md and docs/intervention-pin.md.
 
-Arms (run order default A0, A2, A1, per the pin):
+Arms (default run order A0, A2, A1, per the pin):
 - A0: free-form baseline. No STE instruction.
-- A1: prompt instruction. System prompt states the STE rules and carries
-  the approved word list from data/lexicon.json.
-- A2: post-hoc rewrite. A0 draft first (reasoning frozen), then a rewrite
-  pass that may change surface form only. Cost is draft + rewrite.
+- A1: STE system prompt with the approved word list (`--wordlist`).
+- A2: A0 draft first (reasoning frozen), then a rewrite pass that may
+  change surface form only. Cost is draft + rewrite. The record keeps
+  the draft's own correctness, so a rewrite that fixes or breaks the
+  answer shows.
 
-Metrics per task and arm:
-- correct: answer check on the final text (after the think segment).
-- reasoning_tokens: tokens inside <think>...</think>; the axis that tests
-  "plans in native space, constrains surface only".
-- generated_tokens: all new tokens (reasoning + final).
-- output_tokens: final-text tokens only.
-- latency_s: wall clock of the generate call(s).
-- compliance: fraction of final-text word tokens in the approved
-  vocabulary (scripts/validate.py trie). Numbers are not vocabulary and
-  leave the denominator; task-declared technical terms are allowed.
-- degenerate: empty/near-empty output or a refusal opening. Recorded as
-  its own outcome, never folded into accuracy.
-
-Backends: mock (plumbing test, no model), hf (transformers; CPU or GPU),
-vllm (offline LLM; the DCS cluster path).
-
-Watermark mode (--watermark): hf backend only. Generates watermarked text
-(green-list, eval/watermark.py) under A0 and A1 on the writing tasks at
-temperature 0.7 and reports detection z-scores truncated to matched
-length per task.
+Per task and arm: correct (final text, after the think segment),
+reasoning_tokens, generated_tokens, output_tokens, latency_s,
+compliance (naive rate), checker outcome, degenerate, truncated.
 """
 
-import argparse
-import json
+from __future__ import annotations
+
+import math
 import re
-import sys
-import time
-from pathlib import Path
+import statistics
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
-REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scripts import validate as ste_validate
 
-import validate as ste_validate  # noqa: E402
-import watermark as wm  # noqa: E402
+from .records import (
+    Arm,
+    ArmRecord,
+    Checked,
+    Generation,
+    Kind,
+    Rewrite,
+    Skipped,
+    Task,
+)
 
-REFUSAL_OPENERS = ("I cannot", "I can't", "I'm sorry", "I am sorry",
-                   "I’m sorry", "I can’t")
+REFUSAL_OPENERS = (
+    "I cannot",
+    "I can't",
+    "I'm sorry",
+    "I am sorry",
+    "I’m sorry",
+    "I can’t",
+)
 
 STE_SYSTEM = """You write in ASD-STE100 Simplified Technical English.
 Rules:
@@ -57,440 +55,357 @@ Rules:
 Approved words:
 {approved}"""
 
+STE_SYSTEM_NO_LIST = """You write in ASD-STE100 Simplified Technical English.
+Rules:
+- Use only words that the ASD-STE100 dictionary approves.
+- One meaning per word. Keep sentences short.
+- You may also use numbers, and these technical terms: {technical}"""
+
 REWRITE_USER = """Rewrite the text below in ASD-STE100 Simplified Technical English. Change the surface form only. Do not change facts, numbers, or the final answer line.
 
 {text}"""
 
+THINK_START = "<think>"
+THINK_END = "</think>"
 
-# ---------------------------------------------------------------- lexicon
-
-def load_lexicon():
-    with open(REPO / "data" / "lexicon.json", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def approved_phrases(lexicon):
-    """Same inventory validate.py builds its trie from."""
-    out = []
-    for entry in lexicon["approved"]:
-        out.extend(form.upper() for form in entry["forms"])
-        if entry["plural"]:
-            out.append(entry["plural"].upper())
-    return out
+type Message = dict[str, str]
+type Messages = list[Message]
+type Generate = Callable[[Messages], Generation]
+type CheckText = Callable[[str, tuple[str, ...]], object]
 
 
-def approved_id_list(lexicon):
+class Tokenizer(Protocol):
+    """What the core needs from a backend tokenizer."""
+
+    def think_ids(self) -> tuple[int, int]: ...
+    def decode(self, ids: Sequence[int]) -> str: ...
+    def count(self, text: str) -> int: ...
+
+
+# --------------------------------------------------------------- prompts
+
+
+def approved_id_list(lexicon: dict) -> str:
     """Compact 'WORD (POS)' list for the A1/A2 system prompt."""
     return ", ".join(sorted(e["id"].upper() for e in lexicon["approved"]))
 
 
-# ------------------------------------------------------------- compliance
-
-def compliance(text, trie, technical_terms):
-    """Rate in [0, 1], or None when the text has no scorable tokens.
-
-    Empty output must not read as perfectly compliant; degeneracy is a
-    separate flag and the compliance mean skips None.
-    """
-    toks = [t for t in ste_validate.tokenize(text) if not t.isdigit()]
-    allowed = {t.upper() for t in technical_terms}
-    toks = [t for t in toks if t not in allowed]
-    if not toks:
-        return None, []
-    conforming, nonconforming = ste_validate.validate(" ".join(toks), trie)
-    good = sum(len(p.split()) for p in conforming)
-    total = good + len(nonconforming)
-    return good / total, sorted(set(nonconforming))
+def ste_system(task: Task, wordlist: str | None) -> str:
+    """wordlist None: the STE instruction without the list."""
+    technical = ", ".join(task.technical_terms) or "none"
+    if wordlist is None:
+        return STE_SYSTEM_NO_LIST.format(technical=technical)
+    return STE_SYSTEM.format(technical=technical, approved=wordlist)
 
 
-# --------------------------------------------------------------- checking
-
-def final_answer_line(text):
-    m = re.findall(r"Answer:\s*(.+)", text)
-    return m[-1].strip() if m else text
+def plain(content: str) -> Messages:
+    return [{"role": "user", "content": content}]
 
 
-def check(task, final_text):
-    """True/False for scored tasks, None for unscored (writing)."""
-    gold = task["answer"]
-    if gold is None:
-        return None
+def ste(task: Task, wordlist: str | None, content: str) -> Messages:
+    return [
+        {"role": "system", "content": ste_system(task, wordlist)},
+        {"role": "user", "content": content},
+    ]
+
+
+# ---------------------------------------------------------- answer check
+
+
+ANSWER_LINE = re.compile(r"Answer:\s*(.+)")
+NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+NON_ALNUM = re.compile(r"[^a-z0-9 ]")
+
+
+def final_answer_line(text: str) -> str | None:
+    """The last 'Answer: ...' line, or None."""
+    found = ANSWER_LINE.findall(text)
+    return found[-1].strip() if found else None
+
+
+def words(s: str) -> list[str]:
+    return NON_ALNUM.sub(" ", s.lower()).split()
+
+
+def contains_run(hay: list[str], needle: list[str]) -> bool:
+    """needle is a whole-word run of hay. Words hold no spaces, so a
+    padded substring test is exact."""
+    return bool(needle) and f" {' '.join(needle)} " in f" {' '.join(hay)} "
+
+
+@dataclass(frozen=True, slots=True)
+class Score:
+    """`correct`: judged on the last answer line only; no line is wrong.
+    `fallback`: set only when no answer line exists; the gold found
+    anywhere in the text. A weaker outcome, never counted as correct.
+    Both None for writing."""
+
+    correct: bool | None
+    fallback: bool | None
+
+
+def number_is(gold: float, nums: list[str]) -> bool:
+    return bool(nums) and math.isclose(float(nums[0]), gold, rel_tol=0, abs_tol=1e-6)
+
+
+def check_answer(task: Task, final_text: str) -> Score:
+    """math: the first number on the answer line; fallback: the last
+    number in the text. qa: the gold words as a whole-word run in the
+    answer line; fallback: in the text."""
+    gold = task.answer
     line = final_answer_line(final_text)
-    if task["kind"] == "math":
-        nums = re.findall(r"-?\d+(?:\.\d+)?", line.replace(",", ""))
-        if not nums:
-            nums = re.findall(r"-?\d+(?:\.\d+)?",
-                              final_text.replace(",", ""))
-        if not nums:
-            return False
-        try:
-            return abs(float(nums[-1]) - float(gold)) < 1e-6
-        except ValueError:
-            return False
-    norm = lambda s: re.sub(r"[^a-z0-9 ]", " ", s.lower()).split()  # noqa: E731
-    return norm(str(gold)) == norm(line) or \
-        " ".join(norm(str(gold))) in " ".join(norm(final_text))
+    match task.kind:
+        case Kind.WRITING:
+            return Score(None, None)
+        case Kind.MATH:
+            assert isinstance(gold, int | float)
+            if line is not None:
+                return Score(
+                    number_is(gold, NUMBER.findall(line.replace(",", ""))), None
+                )
+            nums = NUMBER.findall(final_text.replace(",", ""))[-1:]
+            return Score(False, number_is(gold, nums))
+        case Kind.QA:
+            needle = words(str(gold))
+            if line is not None:
+                return Score(contains_run(words(line), needle), None)
+            return Score(False, contains_run(words(final_text), needle))
 
 
-def is_degenerate(final_text):
+# The answer-line label the prompts demand. Not an STE word; allowed in
+# compliance for scored tasks, so the format itself is no violation.
+ANSWER_LABEL = "Answer"
+
+
+def allowed_terms(task: Task) -> tuple[str, ...]:
+    """Technical terms for compliance: the task's, plus the answer label
+    for scored kinds."""
+    if task.kind is Kind.WRITING:
+        return task.technical_terms
+    return (*task.technical_terms, ANSWER_LABEL)
+
+
+def is_degenerate(final_text: str) -> bool:
+    """Empty or near-empty output, or a refusal opening."""
     if len(ste_validate.tokenize(final_text)) < 2:
         return True
-    head = final_text.lstrip()[:60]
-    return any(head.startswith(r) for r in REFUSAL_OPENERS)
+    return final_text.lstrip().startswith(REFUSAL_OPENERS)
 
 
-# --------------------------------------------------------------- backends
-
-class MockBackend:
-    """Deterministic canned text. Tests plumbing only, never accuracy."""
-
-    def __init__(self, model):
-        self.model = model
-
-    def generate(self, messages, max_new_tokens, temperature, seed,
-                 processor=None):
-        blob = " ".join(m["content"] for m in messages)
-        if "Rewrite the text below" in blob:
-            text = ("<think>Use approved words only.</think>"
-                    "Open the cover. Remove the old part. "
-                    "Install the new part. Answer: 200")
-        elif "ASD-STE100" in blob:
-            text = ("<think>Plan the answer with approved words.</think>"
-                    "The pump removes the water. Answer: 200")
-        else:
-            text = ("<think>Compute: 480 - 35 * 8 = 200.</think>"
-                    "After 8 minutes the tank holds less water. Answer: 200")
-        return {"text": text, "token_ids": None, "latency_s": 0.0}
+# ------------------------------------------------------- reasoning split
 
 
-class HFBackend:
-    def __init__(self, model, thinking=True):
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+def split_think[T](
+    seq: Sequence[T], start: T, end: T, think_open: bool
+) -> tuple[Sequence[T], Sequence[T]]:
+    """(reasoning, final) of one generation, over ids or text segments.
 
-        self.tok = AutoTokenizer.from_pretrained(model)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model, torch_dtype="auto", device_map="auto")
-        self.model.eval()
-        self.thinking = thinking
-        self._torch = torch
-
-    def _prompt(self, messages):
-        try:
-            return self.tok.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True,
-                enable_thinking=self.thinking)
-        except TypeError:
-            return self.tok.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True)
-
-    def generate(self, messages, max_new_tokens, temperature, seed,
-                 processor=None):
-        torch = self._torch
-        from transformers import LogitsProcessorList
-
-        prompt = self._prompt(messages)
-        inputs = self.tok(prompt, return_tensors="pt").to(self.model.device)
-        n_prompt = inputs["input_ids"].shape[1]
-        kwargs = {"max_new_tokens": max_new_tokens,
-                  "do_sample": temperature > 0}
-        if temperature > 0:
-            kwargs["temperature"] = temperature
-        if processor is not None:
-            kwargs["logits_processor"] = LogitsProcessorList([processor])
-        torch.manual_seed(seed)
-        t0 = time.perf_counter()
-        with torch.no_grad():
-            out = self.model.generate(**inputs, **kwargs)
-        latency = time.perf_counter() - t0
-        new_ids = out[0][n_prompt:].tolist()
-        return {"text": self.tok.decode(new_ids, skip_special_tokens=False),
-                "token_ids": new_ids, "latency_s": latency}
-
-
-class VLLMBackend:
-    """Offline vLLM. The DCS cluster path (ROCm build of vLLM)."""
-
-    def __init__(self, model, tp=1, thinking=True):
-        from vllm import LLM
-
-        self.llm = LLM(model=model, tensor_parallel_size=tp,
-                       max_model_len=16384, gpu_memory_utilization=0.90,
-                       seed=0)
-        self.tok = self.llm.get_tokenizer()
-        self.thinking = thinking
-
-    def generate(self, messages, max_new_tokens, temperature, seed,
-                 processor=None):
-        from vllm import SamplingParams
-
-        if processor is not None:
-            raise NotImplementedError(
-                "watermark logit bias needs the hf backend")
-        params = SamplingParams(temperature=temperature,
-                                max_tokens=max_new_tokens, seed=seed)
-        t0 = time.perf_counter()
-        outs = self.llm.chat(messages, params,
-                             chat_template_kwargs={
-                                 "enable_thinking": self.thinking})
-        latency = time.perf_counter() - t0
-        o = outs[0].outputs[0]
-        return {"text": o.text, "token_ids": list(o.token_ids),
-                "latency_s": latency}
-
-
-# ------------------------------------------------------------ think spans
-
-def split_reasoning(text, token_ids, tokenizer):
-    """Return (reasoning_tokens, final_text, generated_tokens).
-
-    Reasoning is the <think>...</think> segment. Token counts come from
-    token ids when a backend supplies them, else whitespace words.
+    - end present: reasoning runs from after a preceding start (or from
+      the beginning when none) to the first end.
+    - start only: unclosed segment; the rest is reasoning.
+    - neither, prompt opened the segment: all reasoning (cut at cap).
+    - neither, prompt did not: no reasoning.
     """
-    if tokenizer is not None and token_ids is not None:
-        start = tokenizer.convert_tokens_to_ids("<think>")
-        end = tokenizer.convert_tokens_to_ids("</think>")
-        ids = list(token_ids)
-        if start in ids:
-            i = ids.index(start)
-            if end in ids[i + 1:]:
-                j = ids.index(end, i + 1)
-                reasoning = j - i - 1
-                final_ids = ids[:i] + ids[j + 1:]
-            else:  # unclosed think: the rest is reasoning, no final text
-                reasoning = len(ids) - i - 1
-                final_ids = ids[:i]
-            return reasoning, tokenizer.decode(
-                final_ids, skip_special_tokens=True), len(ids)
-    m = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
-    if m:
-        final = (text[:m.start()] + text[m.end():]).strip()
-        return len(m.group(1).split()), final, len(text.split())
-    if "<think>" in text:  # unclosed
-        return len(text.split("<think>", 1)[1].split()), "", len(text.split())
-    return 0, text.strip(), (len(token_ids) if token_ids is not None
-                             else len(text.split()))
+    if end in seq:
+        j = list(seq).index(end)
+        head = seq[:j]
+        if start in head:
+            i = list(head).index(start)
+            return seq[i + 1 : j], [*seq[:i], *seq[j + 1 :]]
+        return head, seq[j + 1 :]
+    if start in seq:
+        i = list(seq).index(start)
+        return seq[i + 1 :], seq[:i]
+    if think_open:
+        return seq, seq[:0]
+    return seq[:0], seq
+
+
+THINK_TAG = re.compile(f"({re.escape(THINK_START)}|{re.escape(THINK_END)})")
+
+
+@dataclass(frozen=True, slots=True)
+class Measured:
+    reasoning_tokens: int
+    generated_tokens: int
+    final_text: str
+
+
+def measure(gen: Generation, tok: Tokenizer | None) -> Measured:
+    """Token counts from ids when the backend has a tokenizer, else
+    whitespace words over the text."""
+    if tok is not None and gen.token_ids is not None:
+        start, end = tok.think_ids()
+        reasoning, final = split_think(gen.token_ids, start, end, gen.think_open)
+        return Measured(len(reasoning), len(gen.token_ids), tok.decode(final))
+    parts = THINK_TAG.split(gen.text)
+    r_parts, f_parts = split_think(parts, THINK_START, THINK_END, gen.think_open)
+    return Measured(
+        len("".join(r_parts).split()),
+        len(gen.text.split()),
+        "".join(f_parts).strip(),
+    )
+
+
+def count_tokens(text: str, tok: Tokenizer | None) -> int:
+    return tok.count(text) if tok is not None else len(text.split())
 
 
 # ------------------------------------------------------------------- arms
 
-def ste_messages(task, lexicon, user_content):
-    technical = ", ".join(task["technical_terms"]) or "none"
-    system = STE_SYSTEM.format(
-        technical=technical, approved=approved_id_list(lexicon))
-    return [{"role": "system", "content": system},
-            {"role": "user", "content": user_content}]
+
+@dataclass(frozen=True, slots=True)
+class Context:
+    """Run-constant inputs of every arm."""
+
+    model: str
+    backend: str
+    wordlist: str | None
+    tokenizer: Tokenizer | None
+    naive: Callable[[str, tuple[str, ...]], tuple[float | None, tuple[str, ...]]]
 
 
-def run_arm(backend, task, arm, lexicon, trie, cfg):
-    """Returns one result record for (task, arm)."""
-    tok = getattr(backend, "tok", None)
-
-    def gen(messages):
-        return backend.generate(messages, cfg["max_new_tokens"],
-                                cfg["temperature"], cfg["seed"])
-
-    extra = {}
-    if arm == "A0":
-        res = gen([{"role": "user", "content": task["prompt"]}])
-    elif arm == "A1":
-        res = gen(ste_messages(task, lexicon, task["prompt"]))
-    elif arm == "A2":
-        draft = gen([{"role": "user", "content": task["prompt"]}])
-        d_reason, d_final, d_gen = split_reasoning(
-            draft["text"], draft["token_ids"], tok)
-        res = gen(ste_messages(task, lexicon,
-                               REWRITE_USER.format(text=d_final)))
-        r_reason, r_final, r_gen = split_reasoning(
-            res["text"], res["token_ids"], tok)
-        extra = {"draft_generated_tokens": d_gen,
-                 "draft_reasoning_tokens": d_reason,
-                 "rewrite_generated_tokens": r_gen,
-                 "rewrite_reasoning_tokens": r_reason,
-                 "draft_text": d_final}
-        res = {"text": res["text"], "token_ids": res["token_ids"],
-               "latency_s": draft["latency_s"] + res["latency_s"],
-               "_reasoning": d_reason + r_reason,
-               "_generated": d_gen + r_gen,
-               "_final": r_final}
-    else:
-        raise ValueError(f"unknown arm {arm}")
-
-    if "_final" in res:
-        reasoning, final, generated = (res["_reasoning"], res["_final"],
-                                       res["_generated"])
-    else:
-        reasoning, final, generated = split_reasoning(
-            res["text"], res["token_ids"], tok)
-    rate, nonconf = compliance(final, trie, task["technical_terms"])
-    record = {
-        "task_id": task["id"], "kind": task["kind"], "arm": arm,
-        "model": cfg["model"], "backend": cfg["backend"],
-        "correct": check(task, final),
-        "degenerate": is_degenerate(final),
-        "reasoning_tokens": reasoning,
-        "generated_tokens": generated,
-        "output_tokens": (len(tok.encode(final)) if tok is not None
-                          else len(final.split())),
-        "latency_s": round(res["latency_s"], 3),
-        "compliance": (round(rate, 4) if rate is not None else None),
-        "nonconforming": nonconf[:50],
-        "text": final,
-    }
-    record.update(extra)
-    return record
-
-
-# --------------------------------------------------------------- watermark
-
-def run_watermark(backend, tasks, lexicon, cfg):
-    """A0 vs A1 watermarked generation on writing tasks; z at matched len."""
-    if not isinstance(backend, HFBackend):
-        raise SystemExit("--watermark needs the hf backend")
-    vocab = backend.model.config.vocab_size
-    records = []
-    writing = [t for t in tasks if t["kind"] == "writing"]
-    for task in writing:
-        per_arm = {}
-        for arm in ("A0", "A1"):
-            if arm == "A0":
-                messages = [{"role": "user", "content": task["prompt"]}]
-            else:
-                messages = ste_messages(task, lexicon, task["prompt"])
-            proc = wm.GreenListProcessor(vocab, cfg["gamma"], cfg["delta"],
-                                         cfg["wm_key"])
-            res = backend.generate(messages, cfg["wm_tokens"], 0.7,
-                                   cfg["seed"], processor=proc)
-            _, final_ids_text, _ = split_reasoning(
-                res["text"], res["token_ids"], backend.tok)
-            ids = res["token_ids"]
-            per_arm[arm] = ids
-            z, g, t = wm.z_score(ids, vocab, cfg["gamma"], cfg["wm_key"])
-            records.append({"task_id": task["id"], "arm": arm,
-                            "mode": "watermark", "tokens": len(ids),
-                            "z_full": round(z, 3), "greens": g})
-        matched = min(len(per_arm["A0"]), len(per_arm["A1"]))
-        for rec in records[-2:]:
-            z, _, _ = wm.z_score(per_arm[rec["arm"]][:matched], vocab,
-                                 cfg["gamma"], cfg["wm_key"])
-            rec["matched_len"] = matched
-            rec["z_matched"] = round(z, 3)
-    return records
+def run_arm(generate: Generate, task: Task, arm: Arm, ctx: Context) -> ArmRecord:
+    """One record for (task, arm). Effects only through `generate`; A2
+    sequences two calls, the rewrite reads the draft. The checker runs
+    later over the whole run, so `checker` starts as Skipped("pending")."""
+    tok = ctx.tokenizer
+    rewrite = None
+    match arm:
+        case Arm.A0 | Arm.A1:
+            messages = (
+                plain(task.prompt)
+                if arm is Arm.A0
+                else ste(task, ctx.wordlist, task.prompt)
+            )
+            gen = generate(messages)
+            m = measure(gen, tok)
+            reasoning, generated = m.reasoning_tokens, m.generated_tokens
+            latency, truncated = gen.latency_s, gen.truncated
+        case Arm.A2:
+            # ponytail: A2 regenerates the A0 draft. At temperature 0 it
+            # equals the A0 arm; reuse that output if GPU time binds.
+            draft = generate(plain(task.prompt))
+            d = measure(draft, tok)
+            gen = generate(
+                ste(task, ctx.wordlist, REWRITE_USER.format(text=d.final_text))
+            )
+            m = measure(gen, tok)
+            rewrite = Rewrite(
+                draft_text=d.final_text,
+                draft_correct=check_answer(task, d.final_text).correct,
+                draft_generated_tokens=d.generated_tokens,
+                draft_reasoning_tokens=d.reasoning_tokens,
+                rewrite_generated_tokens=m.generated_tokens,
+                rewrite_reasoning_tokens=m.reasoning_tokens,
+            )
+            reasoning = d.reasoning_tokens + m.reasoning_tokens
+            generated = d.generated_tokens + m.generated_tokens
+            latency = draft.latency_s + gen.latency_s
+            truncated = draft.truncated or gen.truncated
+    final = m.final_text
+    rate, nonconforming = ctx.naive(final, allowed_terms(task))
+    score = check_answer(task, final)
+    return ArmRecord(
+        task_id=task.id,
+        kind=task.kind,
+        arm=arm,
+        model=ctx.model,
+        backend=ctx.backend,
+        correct=score.correct,
+        fallback_correct=score.fallback,
+        degenerate=is_degenerate(final),
+        truncated=truncated,
+        reasoning_tokens=reasoning,
+        generated_tokens=generated,
+        output_tokens=count_tokens(final, tok),
+        latency_s=round(latency, 3),
+        compliance=None if rate is None else round(rate, 4),
+        nonconforming=nonconforming[:50],
+        checker=Skipped("pending"),
+        text=final,
+        rewrite=rewrite,
+    )
 
 
 # ---------------------------------------------------------------- summary
 
-def summarize(records):
-    arms = sorted({r["arm"] for r in records if r.get("mode") != "watermark"})
-    lines = []
-    stats = {}
-    for arm in arms:
-        rs = [r for r in records if r["arm"] == arm]
-        scored = [r for r in rs if r["correct"] is not None]
-        acc = (sum(r["correct"] for r in scored) / len(scored)
-               if scored else float("nan"))
-        mean = lambda k: sum(r[k] for r in rs) / len(rs)  # noqa: E731
-        comp = [r["compliance"] for r in rs if r["compliance"] is not None]
-        stats[arm] = {"n": len(rs), "accuracy": acc,
-                      "generated": mean("generated_tokens"),
-                      "reasoning": mean("reasoning_tokens"),
-                      "latency": mean("latency_s"),
-                      "compliance": (sum(comp) / len(comp) if comp
-                                     else float("nan")),
-                      "degenerate": sum(r["degenerate"] for r in rs)}
-        s = stats[arm]
-        lines.append(
-            f"{arm}: n={s['n']} acc={s['accuracy']:.3f} "
-            f"gen_tok={s['generated']:.1f} reason_tok={s['reasoning']:.1f} "
-            f"latency={s['latency']:.2f}s compliance={s['compliance']:.3f} "
-            f"degenerate={s['degenerate']}")
-    if "A0" in stats:
-        base = stats["A0"]
-        ratio = lambda a, b: (a / b) if b else float("nan")  # noqa: E731
-        for arm in arms:
-            if arm == "A0":
-                continue
-            s = stats[arm]
-            lines.append(
-                f"tax {arm}-A0: acc {s['accuracy'] - base['accuracy']:+.3f}, "
-                f"gen_tok x{ratio(s['generated'], base['generated']):.2f}, "
-                f"reason_tok {s['reasoning'] - base['reasoning']:+.1f}, "
-                f"latency x{ratio(s['latency'], base['latency']):.2f}, "
-                f"compliance {s['compliance'] - base['compliance']:+.3f}")
+
+def mean(xs: Iterable[float]) -> float:
+    """Arithmetic mean; NaN on empty, so an absent metric prints nan."""
+    values = list(xs)
+    return statistics.fmean(values) if values else math.nan
+
+
+@dataclass(frozen=True, slots=True)
+class ArmStats:
+    n: int
+    accuracy: float
+    no_line: int
+    fallback_hits: int
+    generated: float
+    reasoning: float
+    latency: float
+    compliance: float
+    degenerate: int
+    truncated: int
+    checked: int
+    checker_ok: float
+    findings: float
+
+
+def arm_stats(rs: Sequence[ArmRecord]) -> ArmStats:
+    checked = [r.checker for r in rs if isinstance(r.checker, Checked)]
+    return ArmStats(
+        n=len(rs),
+        # truncated answers leave the denominator: cut short is not wrong
+        accuracy=mean(
+            float(r.correct) for r in rs if r.correct is not None and not r.truncated
+        ),
+        no_line=sum(r.fallback_correct is not None for r in rs),
+        fallback_hits=sum(r.fallback_correct is True for r in rs),
+        generated=mean(r.generated_tokens for r in rs),
+        reasoning=mean(r.reasoning_tokens for r in rs),
+        latency=mean(r.latency_s for r in rs),
+        compliance=mean(r.compliance for r in rs if r.compliance is not None),
+        degenerate=sum(r.degenerate for r in rs),
+        truncated=sum(r.truncated for r in rs),
+        checked=len(checked),
+        checker_ok=mean(float(c.ok) for c in checked),
+        findings=mean(c.findings for c in checked),
+    )
+
+
+def ratio(a: float, b: float) -> float:
+    return a / b if b else math.nan
+
+
+def summarize(records: Sequence[ArmRecord]) -> str:
+    """Per-arm means, then the tax of each arm against A0."""
+    stats = {
+        arm: arm_stats([r for r in records if r.arm is arm])
+        for arm in sorted({r.arm for r in records})
+    }
+    lines = [
+        f"{arm}: n={s.n} acc={s.accuracy:.3f} "
+        f"no_answer_line={s.no_line} (fallback hits {s.fallback_hits}) "
+        f"gen_tok={s.generated:.1f} reason_tok={s.reasoning:.1f} "
+        f"latency={s.latency:.2f}s compliance={s.compliance:.3f} "
+        f"checker_ok={s.checker_ok:.3f} findings={s.findings:.2f} "
+        f"(checked {s.checked}/{s.n}) "
+        f"degenerate={s.degenerate} truncated={s.truncated}"
+        for arm, s in stats.items()
+    ]
+    if Arm.A0 in stats:
+        base = stats[Arm.A0]
+        lines += [
+            f"tax {arm}-A0: acc {s.accuracy - base.accuracy:+.3f}, "
+            f"gen_tok x{ratio(s.generated, base.generated):.2f}, "
+            f"reason_tok {s.reasoning - base.reasoning:+.1f}, "
+            f"latency x{ratio(s.latency, base.latency):.2f}, "
+            f"compliance {s.compliance - base.compliance:+.3f}, "
+            f"checker_ok {s.checker_ok - base.checker_ok:+.3f}"
+            for arm, s in stats.items()
+            if arm is not Arm.A0
+        ]
     return "\n".join(lines)
-
-
-# ------------------------------------------------------------------- main
-
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--backend", choices=["mock", "hf", "vllm"],
-                    default="mock")
-    ap.add_argument("--model", default="Qwen/Qwen3.8-27B")
-    ap.add_argument("--tasks", default=str(REPO / "eval" / "tasks.jsonl"))
-    ap.add_argument("--arms", nargs="+", default=["A0", "A2", "A1"])
-    ap.add_argument("--out", default=None)
-    ap.add_argument("--max-new-tokens", type=int, default=1024)
-    ap.add_argument("--temperature", type=float, default=0.0)
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--tp", type=int, default=1)
-    ap.add_argument("--no-thinking", action="store_true")
-    ap.add_argument("--watermark", action="store_true")
-    ap.add_argument("--gamma", type=float, default=0.25)
-    ap.add_argument("--delta", type=float, default=2.0)
-    ap.add_argument("--wm-key", type=int, default=42)
-    ap.add_argument("--wm-tokens", type=int, default=200)
-    args = ap.parse_args()
-
-    cfg = vars(args)
-    cfg["thinking"] = not args.no_thinking
-    lexicon = load_lexicon()
-    trie = ste_validate.build_trie(approved_phrases(lexicon))
-    with open(args.tasks, encoding="utf-8") as f:
-        tasks = [json.loads(line) for line in f if line.strip()]
-    if args.limit:
-        tasks = tasks[:args.limit]
-
-    if args.backend == "mock":
-        backend = MockBackend(args.model)
-    elif args.backend == "hf":
-        backend = HFBackend(args.model, thinking=cfg["thinking"])
-    else:
-        backend = VLLMBackend(args.model, tp=args.tp,
-                              thinking=cfg["thinking"])
-
-    out = args.out or str(
-        REPO / "eval" / "results" /
-        f"{args.backend}-{int(time.time())}.jsonl")
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-
-    if args.watermark:
-        records = run_watermark(backend, tasks, lexicon, cfg)
-        with open(out, "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(json.dumps(r) + "\n")
-        for r in records:
-            print(f"{r['task_id']} {r['arm']}: z_full={r['z_full']} "
-                  f"z_matched={r['z_matched']} (n={r['matched_len']})")
-        print(f"wrote {out}")
-        return
-
-    records = []
-    with open(out, "w", encoding="utf-8") as f:
-        for task in tasks:
-            for arm in args.arms:
-                rec = run_arm(backend, task, arm, lexicon, trie, cfg)
-                records.append(rec)
-                f.write(json.dumps(rec) + "\n")
-                f.flush()
-                print(f"{task['id']} {arm}: correct={rec['correct']} "
-                      f"gen={rec['generated_tokens']} "
-                      f"reason={rec['reasoning_tokens']} "
-                      f"compliance={rec['compliance']}")
-    print("\n" + summarize(records))
-    print(f"wrote {out}")
-
-
-if __name__ == "__main__":
-    main()

@@ -10,7 +10,7 @@ strongly they constrain the model:
 2. **Fine-tuning.** Train on STE-compliant corpora; measure whether the
    style becomes "native" (cheap) or stays effortful.
 3. **Constrained decoding.** Restrict generation to the approved word list
-   (`data/lexicon.json`) plus declared technical terms.
+   (built from `data/ste100_dictionary.jsonl`) plus declared technical terms.
 4. **Post-hoc rewrite.** Free-form generation, then a second pass that
    rewrites into STE. Separates reasoning cost from compliance cost.
 
@@ -44,7 +44,7 @@ compliance tax by holding reasoning fixed.
 
 ## Compliance checker
 
-Built from `data/lexicon.json` and `data/rules.json`: tokenize output, flag words not in
+Built from `data/ste100_dictionary.jsonl`: tokenize output, flag words not in
 the approved list (minus declared technical nouns/verbs), flag
 unapproved parts of speech and meanings where detectable. This is what
 makes the "STE condition" checkable rather than vibe-based.

@@ -1,5 +1,8 @@
 # DCS AMD AI hardware: what is there, what runs on it, how the eval uses it
 
+Reconciled 2026-10-08 with docs/fact-check-hardware.md: its eight
+corrections (c-10, c-18, c-27, c-29, c-31, c-38, c-46, c-47) applied.
+
 Purpose: everything a coding agent needs to design and run this repo's
 experiment on the University of Toronto DCS AMD systems, without internet
 access. Facts come from two sources, labeled inline: [invite] is the DCS
@@ -43,7 +46,7 @@ Per GPU:
 - Memory: **288 GB HBM3E per GPU, 8 TB/s peak bandwidth**, 256 MB
   Infinity Cache, full-chip ECC.
 - Compute, dense peak: BF16/FP16 2.3 PFLOPS, FP8 4.6 PFLOPS, FP4 9.2
-  PFLOPS. (Sparse figures are 2x.)
+  PFLOPS. (Sparse figures, where AMD lists them, are 2x; MX formats have none.)
 - Power: 1000 W per module, air-cooled.
 - Scale-up: 7 Infinity Fabric links per GPU, 153.6 GB/s bidirectional
   each, about 1,075 GB/s aggregate per GPU, all-to-all 8-GPU mesh
@@ -55,7 +58,7 @@ Per node: 8 GPUs, **2.3 TB HBM3E**, about 18.4 PFLOPS BF16 dense, two
 
 Context: on dense compute one MI350X is roughly at NVIDIA B200 parity
 (BF16 2.3 vs 2.25 PFLOPS) and far ahead of H100/H200. Its decisive edge
-is memory per GPU: 1.5x B200 (192 GB), 2x H200 (141 GB), 3.6x H100
+is memory per GPU: 1.6x B200 (180 GB), 2x H200 (141 GB), 3.6x H100
 (80 GB). Latency results from this hardware are not a toy-GPU artifact.
 
 ## 3. MI100 node (1x) [ext]
@@ -65,8 +68,8 @@ HBM2 at about 1.23 TB/s**, FP16 matrix about 185 TFLOPS, 300 W.
 
 Role for this repo: bring-up, CI, and the small model. It is about 12x
 slower per GPU than MI350X on dense FP16 and must never carry a
-performance claim. [unknown] Whether the installed ROCm 7.x still
-supports gfx908; ROCm's supported-GPU list is explicit per release.
+performance claim. ROCm 7.14.0 and 10.1.0 list gfx908 (AMD notes,
+2026-10-08); vLLM and AITER do not. [unknown] Which ROCm the node runs; ROCm's supported-GPU list is explicit per release.
 Verify on site (section 6, step 0) before scheduling any MI100 run.
 Fallback if unsupported: pin the node to its older stack, or use it
 only for CPU-side tooling tests.
@@ -74,9 +77,9 @@ only for CPU-side tooling tests.
 ## 4. Software stack [ext]
 
 - ROCm 7.x is the toolchain. MI350X support began at ROCm 7.0. The
-  newest production release verified externally is ROCm 7.14.0, which
-  ships PyTorch 2.12.0, JAX 0.10.0, **vLLM 0.23.0 (described as
-  deployment-ready)**, SGLang 0.5.13, on TheRock modular builds.
+  newest production release, as of 2026-10-08, is ROCm 10.1.0
+  (2026-10-05). The release verified externally is ROCm 7.14.0, which
+  ships PyTorch 2.12.0, JAX 0.10.0, **vLLM 0.23.0 (release notes: "inference-ready vLLM images and packages")**, SGLang 0.5.13, on TheRock modular builds.
   [unknown] Which ROCm version is installed on the DCS nodes.
 - PyTorch ships official ROCm wheels; MI350X target is gfx950.
 - vLLM's GPU install docs list MI350 (gfx950) as supported, with
@@ -106,8 +109,8 @@ batch-1, sequential inference with per-task latency. Models and weights:
 
 | Model | BF16 checkpoint | FP8 checkpoint | Placement |
 | --- | --- | --- | --- |
-| Qwen3.8-27B (27B dense, incl. vision tower) | 55.6 GB | about 28 GB | 1x MI350X |
-| Qwen3.5-9B (9B dense, incl. vision tower) | 19.3 GB | n/a | 1x MI350X, or 1x MI100 |
+| Qwen3.8-27B (27B dense, incl. vision tower) | 55.6 GB | about 31 GB | 1x MI350X |
+| Qwen3.5-9B (9B dense, incl. vision tower) | 19.3 GB | n/a | 1x MI350X, or 1x MI100 if vLLM runs on gfx908 (not in vLLM's ROCm GPU list, 2026-10-08) |
 | GLM-4.7-Flash (30B MoE, optional) | about 62 GB | about 31 GB | 1x MI350X, smoke-test first |
 
 Both Qwen picks are the vendors' current generations (3.8: Aug 2026;
@@ -129,8 +132,8 @@ linear-attention layers carry a fixed-size state instead.
   parallelism 1. No quantization, so precision is not a confound.
 - Qwen3.5-9B: 32 layers, 8 of them full attention, 4 KV heads, head
   dim 256: 32 KB per token. On MI350X it is trivially small. On one
-  MI100 GPU (32 GB), BF16 weights (19.3 GB) leave about 11 GB, roughly
-  340k KV tokens: comfortable in BF16, no FP8 needed. MI100 plan: 9B
+  MI100 GPU (32 GB), BF16 weights (19.3 GB) leave about 9.5 GB at 0.90 utilization, roughly
+  290k KV tokens: comfortable in BF16, no FP8 needed. MI100 plan: 9B
   for bring-up and functional runs; all reported numbers from MI350X
   in BF16.
 

@@ -4,6 +4,7 @@
     uv run python -m eval summarize eval/results/<run-id>
     uv run python -m eval rescore eval/results/<run-id>
     uv run python -m eval tasks
+    python3 -m eval preflight --backend vllm     # on a node, in the image
 
 A run writes eval/results/<run-id>/manifest.json and records.jsonl. The
 summary reads the records back, so analysis never needs the model.
@@ -145,8 +146,30 @@ def version_of(dist: str) -> str | None:
         return None
 
 
-def environment() -> dict[str, Any]:
-    """What docs/dcs-amd-hardware.md asks to keep with every result."""
+GFX = re.compile(r"\bgfx[0-9a-f]+\b")
+# docs/dcs-amd-hardware.md: ROCm 10.1.0 ships vLLM 0.29.0. Older is a
+# stale image; record the exact version either way.
+MIN_VLLM = (0, 29)
+
+
+def torch_devices() -> dict[str, Any] | None:
+    """torch's view of the GPUs, or None without torch. Imports torch."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    n = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    return {
+        "available": torch.cuda.is_available(),
+        "hip": getattr(torch.version, "hip", None),
+        "devices": [torch.cuda.get_device_name(i) for i in range(n)],
+    }
+
+
+def environment(gpu: bool = False) -> dict[str, Any]:
+    """What docs/dcs-amd-hardware.md asks to keep with every result.
+    gpu: also import torch and list its devices (preflight, real runs)."""
+    rocminfo = command_output(["rocminfo"])
     return {
         "python": sys.version,
         "platform": platform.platform(),
@@ -154,9 +177,36 @@ def environment() -> dict[str, Any]:
         "packages": {
             d: version_of(d) for d in ("torch", "vllm", "transformers", "accelerate")
         },
-        "rocminfo": command_output(["rocminfo"]),
+        "gfx": sorted(set(GFX.findall(rocminfo))) if rocminfo else [],
+        "torch_devices": torch_devices() if gpu else None,
+        "rocminfo": rocminfo,
         "rocm-smi": command_output(["rocm-smi"]),
     }
+
+
+def version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:2])
+
+
+def preflight_problems(env: dict[str, Any], backend: str) -> list[str]:
+    """What stops a run of `backend` on this node. Pure."""
+    out = []
+    if env["rocminfo"] is None:
+        out.append("rocminfo: absent or failed")
+    devices = env["torch_devices"]
+    if devices is None:
+        out.append("torch: not importable")
+    elif not devices["available"]:
+        out.append("torch: no GPU visible")
+    if backend == "vllm":
+        v = env["packages"]["vllm"]
+        if v is None:
+            out.append("vllm: not installed (use AMD's ROCm vLLM image)")
+        elif version_tuple(v) < MIN_VLLM:
+            out.append(f"vllm {v}: older than 0.29")
+        if "gfx908" in env["gfx"] and "gfx950" not in env["gfx"]:
+            out.append("gfx908 (MI100): not in vLLM's GPU list; use --backend hf")
+    return out
 
 
 def run_id(backend: str, model: str) -> str:
@@ -272,7 +322,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             "ste-tax": git_state(REPO),
             "skills": git_state(Path(args.skills)),
         },
-        "environment": environment(),
+        "environment": environment(gpu=args.backend != "mock"),
         "started": datetime.now(UTC).isoformat(),
         "finished": None,
     }
@@ -375,6 +425,35 @@ def run_watermark(backend, tasks, wordlist, args) -> list[WatermarkRecord]:
                 )
             )
     return records
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    """Record the node: versions, GPUs, rocminfo, rocm-smi. Writes JSON
+    to --out (default eval/results/preflight-<host>-<UTC>.json). Exit 1
+    when a problem stops a run of --backend; the file is written anyway."""
+    env = environment(gpu=True)
+    problems = preflight_problems(env, args.backend)
+    report = {
+        "at": datetime.now(UTC).isoformat(),
+        "backend": args.backend,
+        "problems": problems,
+        "git": {"ste-tax": git_state(REPO), "skills": git_state(Path(args.skills))},
+        "environment": env,
+    }
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    host = re.sub(r"[^A-Za-z0-9.]+", "-", platform.node()) or "host"
+    out = Path(args.out or RESULTS / f"preflight-{host}-{stamp}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write_json(out, report)
+    pk = env["packages"]
+    print(
+        f"python {sys.version.split()[0]}; torch {pk['torch']}; vllm {pk['vllm']}; "
+        f"transformers {pk['transformers']}; gfx {' '.join(env['gfx']) or 'none'}"
+    )
+    for p in problems:
+        print(f"problem: {p}")
+    print(f"wrote {out}")
+    return 1 if problems else 0
 
 
 def cmd_summarize(args: argparse.Namespace) -> int:
@@ -531,6 +610,12 @@ def parser() -> argparse.ArgumentParser:
     resc.set_defaults(func=cmd_rescore)
     resc.add_argument("run")
     checker_args(resc)
+
+    pre = sub.add_parser("preflight", help="record the node; exit 1 on a problem")
+    pre.set_defaults(func=cmd_preflight)
+    pre.add_argument("--backend", choices=["hf", "vllm"], default="vllm")
+    pre.add_argument("--skills", default=str(SKILLS))
+    pre.add_argument("--out", default=None)
 
     tasks = sub.add_parser("tasks", help="validate task files")
     tasks.set_defaults(func=cmd_tasks)

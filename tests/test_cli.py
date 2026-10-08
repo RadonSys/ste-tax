@@ -2,7 +2,9 @@
 
 import json
 
-from eval.cli import main, read_records
+import pytest
+
+from eval.cli import main, preflight_problems, read_records
 from eval.harness import summarize
 from eval.records import Arm, Skipped
 
@@ -93,3 +95,65 @@ def test_bad_task_file_exits_1(tmp_path, capsys):
     bad.write_text('{"id": "x"}\n')
     assert main(["tasks", "--tasks", str(bad)]) == 1
     assert "missing keys" in capsys.readouterr().err
+
+
+def env(gfx=("gfx950",), vllm="0.29.0", devices=True, rocminfo="ok"):
+    return {
+        "rocminfo": rocminfo,
+        "gfx": list(gfx),
+        "packages": {"vllm": vllm},
+        "torch_devices": None
+        if devices is None
+        else {"available": devices, "hip": "7", "devices": []},
+    }
+
+
+@pytest.mark.parametrize(
+    ("e", "backend", "want"),
+    [
+        (env(), "vllm", []),
+        (env(vllm="0.31.0"), "vllm", []),
+        (env(vllm="0.23.0"), "vllm", ["vllm 0.23.0: older than 0.29"]),
+        (env(vllm=None), "vllm", ["vllm: not installed"]),
+        (env(gfx=("gfx908",)), "vllm", ["gfx908 (MI100)"]),
+        (env(gfx=("gfx908",), vllm=None), "hf", []),
+        (env(devices=False), "hf", ["torch: no GPU visible"]),
+        (env(devices=None), "hf", ["torch: not importable"]),
+        (env(rocminfo=None), "hf", ["rocminfo: absent"]),
+    ],
+)
+def test_preflight_problems(e, backend, want):
+    got = preflight_problems(e, backend)
+    assert len(got) == len(want)
+    assert all(g.startswith(w) for g, w in zip(got, want, strict=True))
+
+
+def test_preflight_writes_json_and_fails_without_gpu(tmp_path, capsys):
+    out = tmp_path / "pre.json"
+    code = main(["preflight", "--backend", "hf", "--out", str(out)])
+    report = json.loads(out.read_text())
+    assert code == (1 if report["problems"] else 0)
+    assert {"python", "packages", "gfx", "rocminfo", "rocm-smi"} <= report[
+        "environment"
+    ].keys()
+    assert "wrote" in capsys.readouterr().out
+
+
+def test_core_imports_stdlib_only():
+    """`python -m eval` runs without uv inside the ROCm image: the shell,
+    core, loader, and compliance import nothing outside the standard
+    library and this repository."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; import eval.cli, eval.harness, eval.compliance; "
+        "own = {'eval', 'scripts'}; "
+        "bad = sorted({m.split('.')[0] for m in sys.modules} "
+        "- set(sys.stdlib_module_names) - own - {'__main__', '_virtualenv', 'sitecustomize'}); "
+        "print(','.join(bad))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == ""

@@ -6,8 +6,9 @@ cluster procedure: ../docs/dcs-amd-hardware.md.
 
 ## Run
 
-Run from the repo root. `eval/` is a package. The core and the mock
-backend need the standard library only.
+Run from the repo root. `eval/` is a package. The shell, the core, and
+the mock backend need the standard library only, so `python3 -m eval`
+runs without uv inside the ROCm image (a test guards the imports).
 
     uv run python -m eval tasks                        # validate task files
     uv run python -m eval run --backend mock           # plumbing test
@@ -19,6 +20,13 @@ Real-model smoke on CPU (fixture model only, never on the dev box):
 
     uv run --extra hf python -m eval run --backend hf \
       --model Qwen/Qwen3.5-0.8B --limit 2 --max-new-tokens 192
+
+Node pre-flight, inside the image. Writes
+`eval/results/preflight-<host>-<UTC>.json` (or `--out`); exit 1 when a
+problem stops a run of `--backend` (no GPU for torch, no vllm, vllm
+older than 0.29, gfx908 for vllm):
+
+    python3 -m eval preflight --backend vllm
 
 Cluster, inside AMD's ROCm vLLM image (vllm comes from the image. This
 project has no vllm extra, because the PyPI wheel targets CUDA):
@@ -73,8 +81,9 @@ then exits 1. Scored prompts must ask for a final line `Answer: <value>`.
 arms, seed, every config value, task file and lexicon SHA-256, sampled
 task ids, git commit and dirty flag of ste-tax and of the skills
 checkout, environment (python, platform, host, torch / vllm /
-transformers / accelerate versions, `rocminfo` and `rocm-smi` output or
-null), start and finish times, and `rescored` after a rescore.
+transformers / accelerate versions, gfx targets from `rocminfo`, torch's
+GPU list on real backends, `rocminfo` and `rocm-smi` output or null;
+the same block `preflight` writes), start and finish times, and `rescored` after a rescore.
 
 `records.jsonl`, one record per task, sample, and arm:
 

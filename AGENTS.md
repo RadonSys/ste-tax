@@ -19,6 +19,10 @@ docs/. This file is for agents doing work in this repo.
 writes every artifact under `data/`. Parse finishes before first write;
 failure leaves `data/` as it was. Exit 1 on parse error.
 
+`uv run scripts/verify.py` checks the artifacts. Exit 1 on any failure.
+Run it before each `data:` commit. Its docstring lists what it does not
+check.
+
 Scripts:
 - `spec.py`: source block, schema version, atomic JSON writer.
 - `extract_dictionary.py`: Part 2 to dictionary and lexicon.

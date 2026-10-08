@@ -50,6 +50,7 @@ needs a checker built from the extracted dictionary in `data/`.
   - `manifest.json`: SHA-256 and byte size of each artifact.
 - `scripts/build.py`: builds `data/`. Run: `uv run scripts/build.py`
   (uv reads `pyproject.toml`, pymupdf pinned in `uv.lock`).
+- `scripts/verify.py`: checks `data/`. Run: `uv run scripts/verify.py`.
 - `docs/`: research design notes.
 
 ## License

@@ -1,0 +1,76 @@
+# Technical nouns and verbs of docs/runbook.md, for the asd-ste100 check:
+#   check --text:file docs/runbook.md --allow:file docs/runbook.terms.txt
+#   --format markdown --mode procedure
+# Names of products, places, and persons
+AMD
+DCS
+ROCm
+vLLM
+Docker
+Qwen
+GSM8K
+MI350X
+MI100
+gfx908
+ste-tax
+PI
+STE
+# Persons
+student
+user
+# Items of the computer work
+hardware
+command
+runbook
+node
+login
+eval
+harness
+eval run
+smoke test
+flag
+field
+log
+lab manager
+account
+sponsorship
+scheduler
+GPU
+GPU-hour policy
+job
+version
+image
+egress
+file
+shared storage
+location
+GB
+checkpoint
+repository
+root
+JSON
+manifest
+software
+computer
+network
+directory
+cluster
+model
+model card
+checker
+submodule
+release
+summary
+backend
+decoding
+sampling
+token
+task file
+process
+specification
+code
+section
+table
+Non-STE
+# Technical verbs
+download

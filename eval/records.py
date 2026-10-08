@@ -151,7 +151,12 @@ class Generation:
 @dataclass(frozen=True, slots=True)
 class Checked:
     """The asd-ste100 checker ran. `findings` counts report findings:
-    one per distinct unapproved word, one per long sentence, and so on."""
+    one per distinct unapproved word, one per long sentence, and so on.
+    `ok`: raw, every finding rejects. `gate_ok`: the validated gate
+    (docs/checker-validation.md, gate row 4) rejects only on findings
+    left after it drops words not in the dictionary, H tokens, and
+    ing_form; `gate_findings` counts those. None in records written
+    before the gate."""
 
     ok: bool
     findings: int
@@ -159,6 +164,8 @@ class Checked:
     words: tuple[str, ...]
     version: str
     mode: str
+    gate_ok: bool | None = None
+    gate_findings: int | None = None
     status: Literal["checked"] = "checked"
 
 
@@ -184,6 +191,8 @@ def parse_checker(raw: dict[str, Any]) -> CheckerOutcome:
                 words=tuple(raw["words"]),
                 version=str(raw["version"]),
                 mode=str(raw["mode"]),
+                gate_ok=raw.get("gate_ok"),
+                gate_findings=raw.get("gate_findings"),
             )
         case {"status": "skipped", "reason": str(reason)}:
             return Skipped(reason)

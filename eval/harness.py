@@ -359,6 +359,7 @@ class ArmStats:
     checked: int
     checker_ok: float
     findings: float
+    gate_ok: float
 
 
 def arm_stats(rs: Sequence[ArmRecord]) -> ArmStats:
@@ -380,6 +381,7 @@ def arm_stats(rs: Sequence[ArmRecord]) -> ArmStats:
         checked=len(checked),
         checker_ok=mean(float(c.ok) for c in checked),
         findings=mean(c.findings for c in checked),
+        gate_ok=mean(float(c.gate_ok) for c in checked if c.gate_ok is not None),
     )
 
 
@@ -392,6 +394,7 @@ MEANS = (
     "latency",
     "compliance",
     "checker_ok",
+    "gate_ok",
     "findings",
 )
 COUNTS = ("n", "no_line", "fallback_hits", "degenerate", "truncated", "checked")
@@ -457,6 +460,7 @@ def summarize(records: Sequence[ArmRecord]) -> str:
             f"latency={m['latency'].show('.2f')}s "
             f"compliance={m['compliance'].show('.3f')} "
             f"checker_ok={m['checker_ok'].show('.3f')} "
+            f"gate_ok={m['gate_ok'].show('.3f')} "
             f"findings={m['findings'].show('.2f')} "
             f"(checked {c['checked']}/{c['n']}) "
             f"degenerate={c['degenerate']} truncated={c['truncated']}"
@@ -475,6 +479,7 @@ def summarize(records: Sequence[ArmRecord]) -> str:
                 f"reason_tok {x['reasoning'] - b['reasoning']:+.1f}, "
                 f"latency x{ratio(x['latency'], b['latency']):.2f}, "
                 f"compliance {x['compliance'] - b['compliance']:+.3f}, "
-                f"checker_ok {x['checker_ok'] - b['checker_ok']:+.3f}"
+                f"checker_ok {x['checker_ok'] - b['checker_ok']:+.3f}, "
+                f"gate_ok {x['gate_ok'] - b['gate_ok']:+.3f}"
             )
     return "\n".join(lines)

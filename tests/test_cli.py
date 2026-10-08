@@ -31,6 +31,7 @@ def test_mock_run_writes_manifest_and_records(tmp_path, capsys):
     assert manifest["finished"] is not None
     assert manifest["git"]["ste-tax"]["commit"]
     assert "eval/tasks.jsonl" in manifest["tasks"]["files"]
+    assert "eval/gate_h.json" in manifest["tasks"]["gate_h"]
     assert {"rocminfo", "rocm-smi", "packages"} <= manifest["environment"].keys()
     assert manifest["config"]["prefix_caching"] is False
     assert manifest["config"]["wordlist"] == "ids"

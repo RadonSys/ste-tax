@@ -31,7 +31,13 @@ from typing import Any
 from scripts import validate as ste_validate
 
 from . import loader
-from .compliance import CheckerCli, checker_off, default_trie, naive_compliance
+from .compliance import (
+    GATE_H,
+    CheckerCli,
+    checker_off,
+    default_trie,
+    naive_compliance,
+)
 from .harness import (
     Context,
     allowed_terms,
@@ -259,6 +265,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "tasks": {
             "files": loader.digests(paths),
             "lexicon": loader.digests([ste_validate.LEXICON]),
+            "gate_h": loader.digests([GATE_H]),
             "ids": [t.id for t in tasks],
         },
         "git": {

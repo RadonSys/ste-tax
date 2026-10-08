@@ -92,7 +92,7 @@ null), start and finish times, and `rescored` after a rescore.
 | `latency_s` | wall clock of the generate call(s) |
 | `compliance` | naive vocabulary rate, or null when nothing is scorable |
 | `nonconforming` | words outside the approved list (max 50) |
-| `checker` | `{status: checked, ok, findings, by_kind, words, version, mode}` or `{status: skipped, reason}` |
+| `checker` | `{status: checked, ok, findings, by_kind, words, version, mode, gate_ok, gate_findings}` or `{status: skipped, reason}` |
 | `text` | final text, think segment removed |
 | `rewrite` | A2 only: draft text, draft correctness, token split |
 
@@ -104,14 +104,14 @@ Summary per arm: `k` samples, then each mean metric as mean±sd. The
 metric is computed per sample index over the tasks, then averaged over
 the k samples (avg@k); sd is the spread of the k per-sample values (0
 for k = 1). Mean metrics: accuracy over scored records that are not
-truncated, tokens, latency, naive compliance, checker `ok` rate, mean
-findings. Counts (records, answer-line misses, fallback hits,
-degenerate, truncated, checked) are sums over all samples. Then each
-arm's tax against A0, on the means.
+truncated, tokens, latency, naive compliance, checker `ok` rate,
+`gate_ok` rate, mean findings. Counts (records, answer-line misses,
+fallback hits, degenerate, truncated, checked) are sums over all
+samples. Then each arm's tax against A0, on the means.
 
 ## Compliance
 
-Two numbers per record:
+Three numbers per record:
 
 - `compliance`: naive rate. Trie over `data/lexicon.json`
   (`scripts/validate.py`). Necessary, not sufficient: no part of
@@ -119,9 +119,25 @@ Two numbers per record:
 - `checker`: `btm-asd-ste100 check` from the asd-ste100 skill, through
   its documented binding, one process per record, after generation, in
   a thread pool (`--workers`, default CPU count). Reads the ste-tax
-  release the skill pins (v0.1.1, same data as `data/`). `findings`
-  counts report findings: one per distinct unapproved word, one per
-  long sentence, and so on. `ok` is necessary, not sufficient.
+  release the skill pins (v0.1.2 at SKILLs b663ba1; word data equal to
+  `data/`). `findings` counts report findings: one per distinct
+  unapproved word, one per long sentence, and so on.
+- `checker.ok`: raw. Every finding rejects. It rejects 44.8% of the
+  spec's own STE examples (docs/checker-validation.md), so an absolute
+  rate from `ok` is invalid. Arm comparisons under one checker and one
+  allow list stay valid; the error is the same kind in each arm, but
+  not independent of the text.
+- `checker.gate_ok`: the validated gate, gate row 4. It drops
+  `not_approved` on a word not in `data/lexicon.json` (no headword
+  link), `not_approved` on an H token (`eval/gate_h.json`, 93 tokens:
+  homographs in the findings of two or more STE examples, such as
+  fuel, pump, oil), and `ing_form`. Every other finding rejects. On the
+  validation set: 4.4% STE false rejects, 89.1% headword recall. State
+  both numbers beside any gate rate. `gate_findings` counts what is
+  left. Pure: no `lookup` call. Replayed over the validation reports
+  of 2026-10-08: 97 of 2197 STE rejects, equal to the table. H is
+  in-sample; regenerate it with `scripts/checker_validation.py` (key
+  `h` of its detail file) after a checker release.
 
 Both allow each task's `technical_terms` (whole multi-word term, regular
 plural), and the label `Answer` on math and qa. Numbers do not count.

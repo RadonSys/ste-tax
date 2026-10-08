@@ -13,46 +13,65 @@ docs/. This file is for agents doing work in this repo.
 - Apply ASD-STE100 principles to own writing: short sentences, one meaning
   per word.
 
-## Parser
+## Build
 
-`scripts/extract_dictionary.py` extracts the dictionary from
-`artifacts/ASD-STE100_ISSUE9.pdf` (pages with "Page 2-1-" markers).
+`uv run scripts/build.py` reads `artifacts/ASD-STE100_ISSUE9.pdf` and
+writes every artifact under `data/`. Parse finishes before first write;
+failure leaves `data/` as it was. Exit 1 on parse error.
 
-Run: `uv run scripts/extract_dictionary.py`. Writes
-`data/ste100_dictionary.jsonl` atomically. Exits nonzero on parse errors;
-existing output is not replaced on failure.
+Scripts:
+- `spec.py`: source block, schema version, atomic JSON writer.
+- `extract_dictionary.py`: Part 2 to dictionary and lexicon.
+- `extract_rules.py`: Part 1 rule list joined to authored paraphrases and
+  parameters.
+- `validate.py`: naive vocabulary check over `data/lexicon.json`.
 
-Output schema (one JSON object per line):
-- `term`: headword, source case preserved. Uppercase = approved.
-- `pos`: part of speech. Closed set: n, v, adj, adv, prep, conj, pron,
-  art, num.
-- `qualifier`: optional parenthesized qualifier (e.g. "from", "that").
-- `forms`: inflected/related forms from the word cell.
-- `senses`: list of {meaning, approved_alternatives, ste_example,
-  nonste_example}.
-- `approved`: derived from term case. Do not store as separate field in
-  new code; it is in the current output for convenience.
+## Artifacts
 
-Key: (term, pos, qualifier). Duplicates are merged.
+Every file: `schema_version` (1) and `source` (title, issue 9, date
+2025-01-15, URL, PDF SHA-256).
+
+- `dictionary.json`: `entries`, one per headword. Key (`word`, `pos`,
+  `qualifier`), unique. `word` keeps source case; uppercase = approved.
+  `status` is a sum: `approved` (meaning, help, alternatives for other
+  meanings) or `unapproved` (alternatives, help, note). Alternative is a
+  sum: `word` (word, pos), `technical` (word, class TN or TV), `phrase`.
+- `lexicon.json`: lowercase. `approved`: id `"word (pos)"`, forms,
+  derived `plural` for nouns. `unapproved`: alternatives as `ref` to an
+  approved id (with `form` or `stated_pos` when the spec names a form or
+  a different pos), `technical`, or `phrase`.
+- `rules.json`: 53 rules: id, section, title, paraphrase, check kind,
+  parameters.
+- `manifest.json`: path, SHA-256, bytes of each artifact.
 
 ## Parser notes
 
-- Approval derived from case only. No separate approved boolean in logic.
-- Parenthesized headwords ("(by chance) (n)") are variants, never new
-  entries.
-- Non-parenthesized headwords always start new entries. Horizontal rules
-  are hints, not the segmentation signal.
-- Headword line may carry merged meaning text ("ADJUSTABLE (adj) That you
-  can adjust"); parser splits it.
-- Qualifiers may be multi-word ("in case of", "a few") or split across
-  lines.
-- Page top cutoff is y=85. The first entry sits at y~93; the header at
-  y<80. A cutoff of 95 silently dropped the first entry on every page.
-- Counts (2026-10-07): 877 approved, 2194 total. Spec intro states 875
-  approved + 1274 non-approved = 2149. The 2-approved / 45-total overage
-  is unresolved; likely counting-methodology differences, not missing
-  entries. Verified against independent extraction: only 18 headwords
-  differ, mostly reference parsing artifacts.
+- Approval derived from case only.
+- Columns from each page header row. Bold word-column text = lexical
+  data; plain word-column text = writer guidance, dropped.
+- Column-2 line indented 29 pt or more = help text. Measured: wrapped
+  numbered senses sit at 12 to 27, help at 30 to 43.
+- Word column of whole dictionary = one token stream, one compiled
+  pattern. Every headword starts an entry. Body = rows to next headword.
+- Line-end hyphen inside a word is soft: `COUNTERCLOCK-` / `WISE (adv)`
+  = `COUNTERCLOCKWISE`. Old parser split these into false entries
+  (`WISE`, `TORY`, `NETIC`, `ABLE`).
+- `chance` / `(by chance) (n)` = one entry, qualifier `by chance`, same
+  as `few (a few) (adj)`.
+- Spec prints forms without commas (`OCCUR`, `PROTRUDE`, `CONTACT`). A
+  tagless word run under a black entry rule = headword with no pos
+  (`FOR EXAMPLE`, `such as`); without the rule = more forms.
+- `re- (prefix)`: the one affix entry; pos `prefix`.
+- Page top cutoff y=85. First entry at y~93; header at y<80.
+- Counts (2026-10-07): 2198 entries. Approved 879 by key, 806 distinct
+  words; spec states 875. Not approved 1319 by key, 1251 distinct
+  words; spec states 1274. Bases tried, none gives both: by key (879,
+  1319), distinct word (806, 1251), tagged only (878, 1318), no
+  qualifier (879, 1306), single-word only (860, 1277). The 208 approved
+  verbs equal the spec's own verb list exactly, so the gap is not
+  missing verbs. Highlights list 11 approved words added and 1 removed
+  in Issue 9; the stated counts may predate some changes. Unresolved;
+  the spec intro does not state its basis.
 
 ## Design docs
 

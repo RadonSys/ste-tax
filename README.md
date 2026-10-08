@@ -38,12 +38,18 @@ needs a checker built from the extracted dictionary in `data/`.
 - `artifacts/ASD-STE100_ISSUE9.pdf`: the specification, committed under the
   educational-use grant documented in `LICENSE` section 3. Canonical source:
   https://www.asd-ste100.org/
-- `data/ste100_dictionary.jsonl`: word list extracted from Part 2 of the
-  specification. One JSON object per line: term, part of speech, qualifier,
-  forms, senses (meaning, approved alternatives, examples).
-- `scripts/extract_dictionary.py`: the parser that produced `data/`.
-  Run: `uv run scripts/extract_dictionary.py` (uv reads `pyproject.toml`,
-  pymupdf pinned in `uv.lock`).
+- `data/`: machine-readable artifacts built from the specification. Each
+  carries `schema_version` and a `source` block:
+  - `dictionary.json`: every headword of Part 2 with part of speech,
+    qualifier, forms, approved meaning or alternatives, help, examples.
+  - `lexicon.json`: compact, lowercase lexicon for a checker: approved
+    words with every form, and unapproved words mapped to approved
+    alternatives.
+  - `rules.json`: the 53 writing rules of Part 1 with a paraphrase and the
+    parameters a checker can enforce.
+  - `manifest.json`: SHA-256 and byte size of each artifact.
+- `scripts/build.py`: builds `data/`. Run: `uv run scripts/build.py`
+  (uv reads `pyproject.toml`, pymupdf pinned in `uv.lock`).
 - `docs/`: research design notes.
 
 ## License

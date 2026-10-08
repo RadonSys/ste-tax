@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Naive ASD-STE100 vocabulary check via trie + greedy longest match.
 
+Run: uv run scripts/validate.py <text> | -f <file>  (reads data/lexicon.json)
+
 Builds a token-level trie from approved words. Walks the input text,
 greedily taking the longest match at each position. Unmatched tokens
 are reported as non-conforming.
@@ -63,7 +65,7 @@ def validate(text, trie):
             if "$" in node:
                 longest = j - i
         if longest > 0:
-            conforming.append(" ".join(tokens[i:i + longest]))
+            conforming.append(" ".join(tokens[i : i + longest]))
             i += longest
         else:
             # No match: single token is non-conforming, restart from head
@@ -77,15 +79,14 @@ def main():
         print(f"Usage: {sys.argv[0]} <text> | -f <file>", file=sys.stderr)
         sys.exit(1)
 
-    # Load approved words
+    # Approved words with every form, and the derived noun plurals
+    with open("data/lexicon.json", encoding="utf-8") as f:
+        lexicon = json.load(f)
     approved = []
-    with open("data/ste100_dictionary.jsonl") as f:
-        for line in f:
-            r = json.loads(line)
-            if r["status"]["kind"] == "approved":
-                approved.append(r["word"])
-                # Also add forms (inflections are approved)
-                approved.extend(r["forms"])
+    for entry in lexicon["approved"]:
+        approved.extend(form.upper() for form in entry["forms"])
+        if entry["plural"]:
+            approved.append(entry["plural"].upper())
 
     trie = build_trie(approved)
 

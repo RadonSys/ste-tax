@@ -1,0 +1,27 @@
+{
+ "schema_version": 1,
+ "source": {
+  "title": "ASD-STE100 Simplified Technical English",
+  "issue": 9,
+  "date": "2025-01-15",
+  "url": "https://www.asd-ste100.org/",
+  "pdf_sha256": "d1f4ea9e7cd6e46b47aa9057209f99e78c0e9cfc4e27a5b07895b05c1a166431"
+ },
+ "artifacts": [
+  {
+   "path": "data/dictionary.json",
+   "sha256": "b6f9c6065f6899c0a3df033b01f49793c2fb0e6083af171fa7ea64a2b6b124e1",
+   "bytes": 1064893
+  },
+  {
+   "path": "data/lexicon.json",
+   "sha256": "832fe6c7dcec07f64ca98e238bdb5c755db500f8f8f568295d2431e9d1836c52",
+   "bytes": 360956
+  },
+  {
+   "path": "data/rules.json",
+   "sha256": "ef990931507cbe47bbef23bfad28a7905b8ae584e39fe3927a0df05fcc569924",
+   "bytes": 17532
+  }
+ ]
+}

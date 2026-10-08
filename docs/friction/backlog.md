@@ -5,7 +5,8 @@ problems" section, and the lead's session notes. One row per distinct
 item after dedup. Built 2026-10-08.
 
 Ledger codes: `harness#N`, `tasks#N`, `checker#N`, `watermark#N`,
-`research#N` = row N of docs/friction/<name>.md. `ste100-pp` = SKILLs
+`research#N`, `backlog-delegate#N` = row N of
+docs/friction/<name>.md. `ste100-pp` = SKILLs
 asd-ste100/SKILL.md "Possible problems". `notes` = lead's session notes.
 
 Status: `fixed <commit>` (SKILLs main or ste-tax main hash), `open
@@ -24,7 +25,7 @@ ledgers. Home: where the fix lands. `L1`..`L4` mark a law (see Laws).
 | B08 | asd-ste100 | text gap | `lookup` entry shape undocumented: `status` is an object (`kind`, `meaning`, `alternatives`); `pos` is absent for a headword with no part of speech, KeyError after an 8-min run (L2) | tasks#9, checker#19 | open https://github.com/BTreeMap/SKILLs/issues/7 | asd-ste100 text, or a `schema` verb |
 | B09 | asd-ste100 | design question | Technical-noun step 1 lists materials but not physical quantities (air, pressure, temperature) | tasks#10 | open https://github.com/BTreeMap/SKILLs/issues/8 | asd-ste100 text |
 | B10 | asd-ste100 | script bug | Capitals switch decided per text, not per sentence; text said "all in capital letters" | checker#2, checker#3 | fixed c02725b | asd-ste100 script and text |
-| B11 | library | contract gap | Every binding unsets `VIRTUAL_ENV` only; with `UV_PROJECT_ENVIRONMENT` set, `uv run --project` installs the skill into the caller's `.venv` (L1) | checker#4, notes | open https://github.com/BTreeMap/SKILLs/issues/9 | author-skill `references/scripts.md` binding plus every skill binding: add `-u UV_PROJECT_ENVIRONMENT` |
+| B11 | library | contract gap | Every binding unsets `VIRTUAL_ENV` only; with `UV_PROJECT_ENVIRONMENT` set, `uv run --project` installs the skill into the caller's `.venv` (L1) | checker#4, backlog-delegate#6, notes | open https://github.com/BTreeMap/SKILLs/issues/9 | author-skill `references/scripts.md` binding plus every skill binding: add `-u UV_PROJECT_ENVIRONMENT` |
 | B12 | asd-ste100 | text gap | Report field `next` ("not in the dictionary: ...") is not in "The report" (L2) | checker#5 | open https://github.com/BTreeMap/SKILLs/issues/10 | asd-ste100 text |
 | B13 | asd-ste100 | script bug | `pos_signal` did not try stems: `check` passed "bottoms" with no signal | checker#6 | fixed 9d3db4a | asd-ste100 script |
 | B14 | asd-ste100 | script bug | Multi-word and qualified headwords never matched, or keyed by the bare word | checker#7, checker#8 | fixed 9d3db4a, 10a1305 | asd-ste100 script |
@@ -74,6 +75,13 @@ ledgers. Home: where the fix lands. `L1`..`L4` mark a law (see Laws).
 | B58 | ste-tax | contract gap | pytest and numpy were not project dependencies | watermark#6 | fixed f0d8261, 957b486 | ste-tax pyproject.toml |
 | B59 | ste-tax | script bug | Blank pages and Non-STE column slack put non-STE text in STE examples | checker#15 | fixed 585fb9b | ste-tax build.py, verify.py |
 | B60 | ste-tax | design question | A2 runs its own A0 draft; at temperature 0 it equals A0's output; reuse when GPU time binds | harness debt | open https://github.com/RadonSys/ste-tax/issues/2 | ste-tax eval |
+| B61 | draft-paper | text gap | `init "ste-tax design plan"` signals "two or three keywords resolve best": a hyphenated keyword seems to count twice | backlog-delegate#1 | open https://github.com/BTreeMap/SKILLs/issues/40 | draft-paper text: say how a hyphenated keyword counts |
+| B62 | draft-paper | design question | For `design`, claims must be noted in stage 1 for the plan to render its ledger; the `ledger` gate then re-approves the same mapping | backlog-delegate#2 | open https://github.com/BTreeMap/SKILLs/issues/41 | draft-paper text and gates: note claims before the plan gate, or merge the gates for `design` |
+| B63 | draft-paper | text gap | Gate standings undefined (`open` reads as passed); after approval `next` said "finish stage 1" | backlog-delegate#3 | fixed b25cbf9 (SKILLs wt/backlog, unmerged) | draft-paper text and script |
+| B64 | draft-paper | design question | `--artifacts` pinned to a worktree path that is deleted after merge; no command re-pins the root | backlog-delegate#4 | open https://github.com/BTreeMap/SKILLs/issues/42 | draft-paper script: `repin`, or a root relative to the git toplevel |
+| B65 | draft-paper | text gap | Stages 0 and 1 give no path for an undecided venue or for same-week reviews that already exist | backlog-delegate#5 | open https://github.com/BTreeMap/SKILLs/issues/43 | draft-paper text: Pipeline |
+| B66 | ste-tax | contract gap | `gh` token has pull only on BTreeMap/SKILLs: labels cannot be created | backlog-delegate#7 | closed: access, outside both repositories; reported to the lead | none |
+| B67 | ste-tax | contract gap | Ledger fix hashes are branch hashes; main hashes differ after merge | backlog-delegate#8 | fixed ab3b85f | ste-tax docs/friction/README.md |
 
 ## Laws
 

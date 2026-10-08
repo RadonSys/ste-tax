@@ -42,8 +42,9 @@ Technical English, Issue 9 (January 2025)":
 
     - artifacts/ASD-STE100_ISSUE9.pdf
       (the specification document itself)
-    - data/ste100_dictionary.*
-      (word list extracted from Part 2 of the specification for research
+    - data/dictionary.json, data/lexicon.json, data/rules.json,
+      data/manifest.json
+      (word list and rules extracted from the specification for research
       use, e.g. building an STE compliance checker)
 
 These artifacts are NOT covered by the MIT license in section 2. They

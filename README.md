@@ -42,7 +42,8 @@ needs a checker built from the extracted dictionary in `data/`.
   specification. One JSON object per line: term, part of speech, qualifier,
   forms, senses (meaning, approved alternatives, examples).
 - `scripts/extract_dictionary.py`: the parser that produced `data/`.
-  Run: `python3 scripts/extract_dictionary.py`.
+  Run: `uv run scripts/extract_dictionary.py` (uv reads `pyproject.toml`,
+  pymupdf pinned in `uv.lock`).
 - `docs/`: research design notes.
 
 ## License

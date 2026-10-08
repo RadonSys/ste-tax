@@ -18,7 +18,7 @@ docs/. This file is for agents doing work in this repo.
 `scripts/extract_dictionary.py` extracts the dictionary from
 `artifacts/ASD-STE100_ISSUE9.pdf` (pages with "Page 2-1-" markers).
 
-Run: `python3 scripts/extract_dictionary.py`. Writes
+Run: `uv run scripts/extract_dictionary.py`. Writes
 `data/ste100_dictionary.jsonl` atomically. Exits nonzero on parse errors;
 existing output is not replaced on failure.
 

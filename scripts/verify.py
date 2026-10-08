@@ -11,7 +11,8 @@ Checks:
 - dictionary: approved iff the headword is uppercase; key (word, pos,
   qualifier) unique; pos from the closed set
 - lexicon: approved words are the dictionary's uppercase headwords
-  lowercased, with lowercase forms; ids unique
+  lowercased, with lowercase forms; ids unique; each unapproved entry
+  carries the dictionary's help, and one with no alternative has help
 - referential integrity: every alternative in the lexicon names an
   approved id; every tagged alternative of an approved dictionary entry
   resolves the same way
@@ -113,6 +114,17 @@ def check_lexicon(entries: list[dict[str, Any]], lexicon: dict[str, Any]) -> Fai
     for a in lexicon["approved"]:
         bad = [f for f in [a["word"], *a["forms"]] if f != f.lower()]
         out += [f"lexicon form {f!r} not lowercase" for f in bad]
+    helps = {
+        (e["word"].lower(), e["pos"], e["qualifier"]): e["status"]["help"]
+        for e in entries
+        if e["status"]["kind"] == "unapproved"
+    }
+    for u in lexicon["unapproved"]:
+        key = (u["word"], u["pos"], u["qualifier"])
+        if u.get("help") != helps.get(key):
+            out.append(f"lexicon help of {key!r} differs from the dictionary")
+        if not u["alternatives"] and not u.get("help"):
+            out.append(f"lexicon {key!r}: no alternative and no help, a dead end")
     return out
 
 

@@ -3,6 +3,9 @@
 
 Run: uv run scripts/validate.py <text> | -f <file>  (reads data/lexicon.json)
 
+The eval harness imports this module (`scripts.validate`) for its naive
+compliance rate; keep the functions pure.
+
 Builds a token-level trie from approved words. Walks the input text,
 greedily taking the longest match at each position. Unmatched tokens
 are reported as non-conforming.
@@ -21,6 +24,19 @@ A text that fails this check definitely violates it (unknown word used).
 import json
 import re
 import sys
+from pathlib import Path
+
+LEXICON = Path(__file__).resolve().parent.parent / "data" / "lexicon.json"
+
+
+def approved_phrases(lexicon):
+    """Approved words with every form, and the derived noun plurals."""
+    out = []
+    for entry in lexicon["approved"]:
+        out.extend(form.upper() for form in entry["forms"])
+        if entry["plural"]:
+            out.append(entry["plural"].upper())
+    return out
 
 
 def build_trie(phrases):
@@ -79,16 +95,8 @@ def main():
         print(f"Usage: {sys.argv[0]} <text> | -f <file>", file=sys.stderr)
         sys.exit(1)
 
-    # Approved words with every form, and the derived noun plurals
-    with open("data/lexicon.json", encoding="utf-8") as f:
-        lexicon = json.load(f)
-    approved = []
-    for entry in lexicon["approved"]:
-        approved.extend(form.upper() for form in entry["forms"])
-        if entry["plural"]:
-            approved.append(entry["plural"].upper())
-
-    trie = build_trie(approved)
+    with open(LEXICON, encoding="utf-8") as f:
+        trie = build_trie(approved_phrases(json.load(f)))
 
     if sys.argv[1] == "-f":
         with open(sys.argv[2]) as f:

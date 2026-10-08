@@ -1,0 +1,17 @@
+eval/tasks/nq_open.jsonl is an adaptation of NQ-open (Natural Questions,
+open-domain subset), copyright Google LLC.
+
+Source: https://github.com/google-research-datasets/natural-questions
+File:   nq_open/NQ-open.dev.jsonl at commit
+        fb26a3073b1fe636c97302890a27b491d6530130
+Upstream statement (nq_open/README.md): "All of the Natural Questions data
+is released under the CC BY-SA 3.0 license."
+
+License: Creative Commons Attribution-ShareAlike 3.0 Unported,
+https://creativecommons.org/licenses/by-sa/3.0/
+
+Changes: 400 items sampled (seed 0) from those with one annotated answer
+and no time-dated wording; "?" and an answer-format instruction appended
+to each question; the answer list reduced to its one string; fields
+renamed to the ste-tax task schema. The adaptation is released under the
+same license. Regenerate: see docs/tasks.md.

@@ -40,6 +40,9 @@ Rejected for the primary pair:
 
 ## Hardware fit (DCS AMD donation)
 
+Full hardware analysis, run procedure, and pre-flight checks:
+docs/dcs-amd-hardware.md. Summary:
+
 - MI350X: 288 GB HBM3E per GPU, 8 per node, gfx950, ROCm 7 with
   vLLM 0.23. Qwen3-32B in BF16 uses about 66 GB: one GPU, large KV
   headroom. No tensor parallelism, no quantization; BF16 only, so

@@ -18,6 +18,7 @@ Where fixes land:
 
 - Small decidable fix in a skill: SKILLs worktree branch, one commit,
   hash in the row. The lead merges. Never edit `.github/skills`.
+  After the merge, the hash on main replaces the branch hash.
 - ste-tax fix: ste-tax branch, same rule.
 - Design question or large fix: leave open. It goes to backlog.md and to
   a GitHub issue (BTreeMap/SKILLs for library items, RadonSys/ste-tax

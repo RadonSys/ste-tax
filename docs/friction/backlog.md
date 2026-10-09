@@ -98,3 +98,5 @@ An item that recurs in another skill becomes one rule or one helper.
   member (B53). Home: kernel.
 - L4 delegate isolation: parallel delegates get disjoint scratch paths
   (B51). Home: summon.
+| B68 | fact-check | contract gap | No route names a read-only live probe for a claim about an API's shape or limits; the brief had to add it | verification delegate#6 | open https://github.com/BTreeMap/SKILLs/issues/44 | fact-check claims route table |
+| B69 | search-web | text gap | `fetch` returned 51 characters from a JavaScript-rendered docs page with exit 0 and no signal; a weaker run reads that as empty docs | verification delegate#2 | open https://github.com/BTreeMap/SKILLs/issues/45 | search-web sources.fetch signal |
